@@ -58,6 +58,9 @@ class SafeCookTools {
   final Future<ToolResult> Function() disconnectBluetooth;
   final ToolResult Function() bluetoothStatus;
 
+  // Web search tool
+  final Future<ToolResult> Function(String query)? webSearch;
+
   const SafeCookTools({
     required this.searchRecipes,
     required this.startCooking,
@@ -69,6 +72,7 @@ class SafeCookTools {
     required this.connectBluetooth,
     required this.disconnectBluetooth,
     required this.bluetoothStatus,
+    this.webSearch,
   });
 }
 
@@ -88,6 +92,7 @@ SafeCookTools buildNoOpTools() {
     connectBluetooth: () async => const ToolResult.fail('Bluetooth tools not wired'),
     disconnectBluetooth: () async => const ToolResult.fail('Bluetooth tools not wired'),
     bluetoothStatus: () => const ToolResult.fail('Bluetooth tools not wired'),
+    webSearch: (_) async => const ToolResult.fail('Web search not available in no-op mode'),
   );
 }
 

@@ -12,6 +12,9 @@ import 'package:safecook_bluetooth_test/safety/safecook_safety_engine.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_state.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_event.dart';
 import 'package:safecook_bluetooth_test/services/preference_service.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:safecook_bluetooth_test/services/web_search_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:safecook_bluetooth_test/main.dart';
@@ -2537,6 +2540,247 @@ void main() {
           isBluetoothConnected: true,
         );
         expect(engine.currentState, equals(SafeCookSafetyState.caution));
+      });
+    });
+
+    group('Phase 7: Real Web Search Tests', () {
+      late HttpServer mockServer;
+      final service = WebSearchService();
+
+      setUp(() async {
+        HttpOverrides.global = null;
+        mockServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        service.setBaseUrl('http://localhost:${mockServer.port}');
+      });
+
+      tearDown(() async {
+        await mockServer.close(force: true);
+      });
+
+      test('W1. Explicit web-search NLU parsing', () {
+        final query = 'search the web for standard refrigerator temp';
+        final intent = SafeCookNLU.parse(query);
+        expect(intent.type, equals(SafeCookIntentType.webSearch));
+        expect(intent.entities['webQuery'], equals('standard refrigerator temp'));
+      });
+
+      test('W2. WebSearchService success flow', () async {
+        mockServer.listen((request) async {
+          final payload = {
+            'success': true,
+            'results': [
+              {
+                'title': 'Test title',
+                'url': 'https://test.com',
+                'snippet': 'Test snippet of results.'
+              }
+            ],
+            'answer': 'Concise test answer.'
+          };
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode(payload));
+          await request.response.close();
+        });
+
+        final result = await service.search('some query');
+        expect(result.success, isTrue);
+        expect(result.message, equals('Web search succeeded.'));
+        final data = result.data as WebSearchResponse;
+        expect(data.answer, equals('Concise test answer.'));
+        expect(data.results.first.title, equals('Test title'));
+      });
+
+      test('W3. WebSearchService HTTP status failure', () async {
+        mockServer.listen((request) async {
+          request.response
+            ..statusCode = HttpStatus.internalServerError
+            ..write('Internal server error');
+          await request.response.close();
+        });
+
+        final result = await service.search('query');
+        expect(result.success, isFalse);
+        expect(result.message, contains('Backend proxy error: HTTP 500'));
+      });
+
+      test('W4. WebSearchService timeout/network failure', () async {
+        service.setBaseUrl('http://localhost:59999');
+
+        final result = await service.search('query');
+        expect(result.success, isFalse);
+        expect(result.message, contains('Network unavailable or proxy server offline'));
+      });
+
+      test('W5. Agent web-search tool dispatch', () async {
+        final agent = SafeCookAgent()..reset();
+
+        final mockTools = SafeCookTools(
+          searchRecipes: buildNoOpTools().searchRecipes,
+          startCooking: buildNoOpTools().startCooking,
+          nextStep: buildNoOpTools().nextStep,
+          previousStep: buildNoOpTools().previousStep,
+          repeatStep: buildNoOpTools().repeatStep,
+          goToStep: buildNoOpTools().goToStep,
+          endCooking: buildNoOpTools().endCooking,
+          connectBluetooth: buildNoOpTools().connectBluetooth,
+          disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+          bluetoothStatus: buildNoOpTools().bluetoothStatus,
+          webSearch: (query) async {
+            return ToolResult.ok('Search OK', data: WebSearchResponse(
+              results: [WebSearchResult(title: 'T1', url: 'U1', snippet: 'S1')],
+              answer: 'Concise Answer'
+            ));
+          },
+        );
+
+        final reply = await agent.handleInput(
+          'search the web for something',
+          cookingCtx(),
+          mockTools,
+        );
+        expect(reply, equals('Concise Answer'));
+        expect(agent.memory.pendingWebQuery, isNull);
+      });
+
+      test('W6. Gemini webSearch tool call parsing and execution', () async {
+        final agent = SafeCookAgent()..reset();
+
+        final mockTools = SafeCookTools(
+          searchRecipes: buildNoOpTools().searchRecipes,
+          startCooking: buildNoOpTools().startCooking,
+          nextStep: buildNoOpTools().nextStep,
+          previousStep: buildNoOpTools().previousStep,
+          repeatStep: buildNoOpTools().repeatStep,
+          goToStep: buildNoOpTools().goToStep,
+          endCooking: buildNoOpTools().endCooking,
+          connectBluetooth: buildNoOpTools().connectBluetooth,
+          disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+          bluetoothStatus: buildNoOpTools().bluetoothStatus,
+          webSearch: (query) async {
+            expect(query, equals('current temperature'));
+            return ToolResult.ok('Search OK', data: WebSearchResponse(
+              results: [WebSearchResult(title: 'T2', url: 'U2', snippet: 'S2')],
+              answer: 'Gemini Concise Answer'
+            ));
+          },
+        );
+
+        agent.aiProvider = _MockRespondingAIProvider(AIResponse(
+          assistantText: 'I will search the web.',
+          intent: SafeCookIntentType.webSearch,
+          toolCall: 'webSearch',
+          toolArguments: {'query': 'current temperature'},
+          confidence: 0.95,
+        ));
+
+        final reply = await agent.handleInput(
+          'how warm is it today?',
+          cookingCtx(),
+          mockTools,
+        );
+        expect(reply, equals('Gemini Concise Answer'));
+      });
+
+      test('W7. Deterministic cooking commands bypass web search', () async {
+        final agent = SafeCookAgent()..reset();
+        agent.memory.isCookingActive = true;
+        agent.memory.selectedRecipe = kPredefinedRecipes.first;
+        agent.memory.conversationState = ConversationState.cooking;
+
+        bool webSearchCalled = false;
+        final mockTools = SafeCookTools(
+          searchRecipes: buildNoOpTools().searchRecipes,
+          startCooking: buildNoOpTools().startCooking,
+          nextStep: () async {
+            return const ToolResult.ok('Next step success');
+          },
+          previousStep: buildNoOpTools().previousStep,
+          repeatStep: buildNoOpTools().repeatStep,
+          goToStep: buildNoOpTools().goToStep,
+          endCooking: buildNoOpTools().endCooking,
+          connectBluetooth: buildNoOpTools().connectBluetooth,
+          disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+          bluetoothStatus: buildNoOpTools().bluetoothStatus,
+          webSearch: (query) async {
+            webSearchCalled = true;
+            return const ToolResult.fail('Should not be called');
+          },
+        );
+
+        final reply = await agent.handleInput(
+          'next step',
+          cookingCtx(),
+          mockTools,
+        );
+        expect(webSearchCalled, isFalse);
+        expect(reply.toLowerCase(), isNot(contains("i'm not sure about that")));
+      });
+
+      test('W8. Safety remains functional during search failure', () async {
+        final agent = SafeCookAgent()..reset();
+        
+        final mockTools = SafeCookTools(
+          searchRecipes: buildNoOpTools().searchRecipes,
+          startCooking: buildNoOpTools().startCooking,
+          nextStep: buildNoOpTools().nextStep,
+          previousStep: buildNoOpTools().previousStep,
+          repeatStep: buildNoOpTools().repeatStep,
+          goToStep: buildNoOpTools().goToStep,
+          endCooking: buildNoOpTools().endCooking,
+          connectBluetooth: buildNoOpTools().connectBluetooth,
+          disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+          bluetoothStatus: buildNoOpTools().bluetoothStatus,
+          webSearch: (query) async {
+            return const ToolResult.fail('Network error');
+          },
+        );
+
+        final reply = await agent.handleInput(
+          'search the web for current weather',
+          cookingCtx(),
+          mockTools,
+        );
+        expect(reply, contains('I was unable to search the web right now. Network error'));
+
+        final engine = SafeCookSafetyEngine()..reset();
+        engine.updateSensorData(
+          gasPercentage: 15.0,
+          chefDistanceCm: 50.0,
+          isBluetoothConnected: true,
+        );
+        expect(engine.currentState, equals(SafeCookSafetyState.safe));
+      });
+
+      test('W9. WebSearchService default URL is production Cloudflare Worker', () {
+        expect(WebSearchService(), isNotNull);
+      });
+
+      test('W10. WebSearchService rejects empty queries locally', () async {
+        final result = await service.search('   ');
+        expect(result.success, isFalse);
+        expect(result.message, equals('Search query cannot be empty.'));
+      });
+
+      test('W11. WebSearchService handles CORS preflight simulation', () async {
+        mockServer.listen((request) async {
+          if (request.method == 'OPTIONS') {
+            request.response
+              ..statusCode = HttpStatus.noContent
+              ..headers.set('Access-Control-Allow-Origin', '*')
+              ..headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
+              ..headers.set('Access-Control-Allow-Headers', 'Content-Type');
+            await request.response.close();
+          }
+        });
+
+        final client = HttpClient();
+        final req = await client.openUrl('OPTIONS', Uri.parse('http://localhost:${mockServer.port}/search'));
+        final resp = await req.close();
+        expect(resp.statusCode, equals(HttpStatus.noContent));
+        expect(resp.headers.value('Access-Control-Allow-Origin'), equals('*'));
+        client.close();
       });
     });
   });

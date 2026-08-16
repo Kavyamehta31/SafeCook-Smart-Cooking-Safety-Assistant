@@ -5,6 +5,7 @@ import '../data/recipes.dart';
 import '../agent/safecook_agent.dart';
 import '../agent/safecook_context.dart';
 import '../agent/safecook_tools.dart';
+import 'web_search_service.dart';
 
 // ---------------------------------------------------------------------------
 // Gas calibration layer — converts raw ADC to a 0-100% percentage.
@@ -132,6 +133,7 @@ class VoiceAssistantService {
       connectBluetooth: actions.onConnectBluetooth,
       disconnectBluetooth: actions.onDisconnectBluetooth,
       bluetoothStatus: actions.onBluetoothStatus,
+      webSearch: (query) => WebSearchService().search(query),
     );
 
     return SafeCookAgent().handleInput(command, agentContext, agentTools);

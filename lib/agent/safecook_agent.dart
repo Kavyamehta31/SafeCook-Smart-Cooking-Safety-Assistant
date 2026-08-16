@@ -7,6 +7,7 @@ import 'safecook_intent.dart';
 import 'safecook_tools.dart';
 import 'safecook_ai_provider.dart';
 import 'safecook_conversation_memory.dart';
+import '../services/web_search_service.dart';
 import 'package:flutter/foundation.dart';
 import '../safety/safecook_safety_engine.dart';
 import '../safety/safecook_safety_state.dart';
@@ -393,8 +394,7 @@ class SafeCookAgent {
         responseText = await _handleDisconnectBluetooth(intent, tools);
       } else if (intent.type == SafeCookIntentType.webSearch) {
         final query = intent.entities['webQuery'] as String? ?? rawInput;
-        responseText =
-            'I don\'t have web search integrated yet. Would you like help with a recipe, cooking instructions, or a safety check? Your query was: "$query".';
+        responseText = await _handleWebSearch(query, tools);
       } else if (intent.type == SafeCookIntentType.cookingQuestion) {
         final answer = _localCookingKnowledge(rawInput.toLowerCase());
         if (answer != null) {
@@ -555,6 +555,9 @@ class SafeCookAgent {
               );
             } else if (tCall == 'endCooking') {
               responseText = _handleEndCooking(context);
+            } else if (tCall == 'webSearch') {
+              final query = aiResponse.toolArguments['query'] as String? ?? rawInput;
+              responseText = await _handleWebSearch(query, tools);
             } else {
               responseText = aiResponse.assistantText;
             }
@@ -1137,6 +1140,32 @@ class SafeCookAgent {
     return result.success
         ? 'Sensor disconnected.'
         : 'I was unable to disconnect. ${result.message}';
+  }
+
+  Future<String> _handleWebSearch(
+    String query,
+    SafeCookTools tools,
+  ) async {
+    _mem.pendingWebQuery = query;
+    if (tools.webSearch == null) {
+      return 'I was unable to search the web right now. Web search is not wired.';
+    }
+    final result = await tools.webSearch!(query);
+    logTool('webSearch', result);
+    if (result.success) {
+      _mem.pendingWebQuery = null;
+      final response = result.data as WebSearchResponse;
+      if (response.answer != null && response.answer!.trim().isNotEmpty) {
+        return response.answer!;
+      }
+      if (response.results.isNotEmpty) {
+        final topResult = response.results.first;
+        return '${topResult.snippet} (Source: ${topResult.title})';
+      }
+      return 'I found no results online for "$query".';
+    } else {
+      return 'I was unable to search the web right now. ${result.message}';
+    }
   }
 
   String _handleUnknown(
