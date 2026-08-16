@@ -5,32 +5,22 @@ import '../models/recipe.dart';
 // on EVERY call so the agent always reads fresh sensor data.
 // ---------------------------------------------------------------------------
 class SafeCookContext {
-  final Recipe? recipe;
-  final int currentStepIndex;
-  final int totalSteps;
   final int? gasValue;        // raw ADC value from sensor
   final double? gasPercent;   // calibrated 0-100%
   final String? distanceValue; // formatted string e.g. "28.5 cm"
   final double? distanceCm;    // parsed double for arithmetic
   final String safetyState;
   final Duration sessionDuration;
-  final bool isCookingActive;
   final bool isBluetoothConnected;
-  final String currentConversationState;
 
   const SafeCookContext({
-    this.recipe,
-    this.currentStepIndex = 0,
-    this.totalSteps = 0,
     this.gasValue,
     this.gasPercent,
     this.distanceValue,
     this.distanceCm,
     required this.safetyState,
     required this.sessionDuration,
-    required this.isCookingActive,
     required this.isBluetoothConnected,
-    required this.currentConversationState,
   });
 }
 

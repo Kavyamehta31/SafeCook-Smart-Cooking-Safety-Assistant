@@ -288,14 +288,10 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> implements
             'processingStarted=true');
 
         final voiceCtx = VoiceAssistantContext(
-          recipe: widget.recipe,
-          currentStepIndex: currentStepIndex,
-          totalSteps: widget.recipe.steps.length,
           gasValue: widget.homeState.currentGasValue,
           distanceValue: widget.homeState.currentDistanceValue,
           safetyState: widget.homeState.currentSafetyState,
           sessionDuration: widget.homeState.sessionDuration,
-          isCookingActive: true,
           isBluetoothConnected: widget.homeState.isBluetoothConnected,
         );
 

@@ -291,14 +291,6 @@ class SafeCookAgent {
     _mem.sessionDuration = context.sessionDuration;
     _mem.isBluetoothConnected = context.isBluetoothConnected;
 
-    // If the UI says cooking is active, keep our state consistent.
-    if (context.isCookingActive && !_mem.isCookingActive) {
-      _mem.isCookingActive = true;
-      if (_mem.conversationState == ConversationState.idle) {
-        _mem.conversationState = ConversationState.cooking;
-      }
-    }
-
     _mem.lastUserRequest = rawInput;
 
     // Check for deliberate safety-rule override attempts before any routing.
@@ -340,7 +332,7 @@ class SafeCookAgent {
       if (intent.type == SafeCookIntentType.greeting) {
         if (_mem.isCookingActive) {
           final step = _mem.currentStepIndex + 1;
-          final total = context.totalSteps;
+          final total = _mem.selectedRecipe?.steps.length ?? 0;
           responseText =
               'Hello! I\'m here. You are on step $step of $total. How can I help?';
         } else {
@@ -667,7 +659,7 @@ class SafeCookAgent {
       case ConversationState.confirmingEnd:
         _mem.conversationState = ConversationState.cooking;
         final stepIdx = _mem.currentStepIndex;
-        final recipe = context.recipe ?? _mem.selectedRecipe;
+        final recipe = _mem.selectedRecipe;
         if (recipe != null && stepIdx < recipe.steps.length) {
           final step = recipe.steps[stepIdx];
           return 'Okay, continuing. You are on step ${stepIdx + 1}: ${step.voiceInstruction}';
@@ -773,7 +765,7 @@ class SafeCookAgent {
         return 'A cooking session is already active.';
       }
     }
-    var recipe = context.recipe ?? _mem.selectedRecipe;
+    var recipe = _mem.selectedRecipe;
     if (recipe == null) {
       final normalized = _norm(_mem.lastUserRequest ?? '');
       final cleanedQuery = _cleanQuery(normalized);
@@ -808,9 +800,9 @@ class SafeCookAgent {
     if (!_mem.isCookingActive) {
       return 'Please select a recipe and start cooking first.';
     }
-    final recipe = context.recipe ?? _mem.selectedRecipe;
-    final stepIdx = context.currentStepIndex; // authoritative source from UI
-    final total = context.totalSteps;
+    final recipe = _mem.selectedRecipe;
+    final stepIdx = _mem.currentStepIndex; // authoritative source from UI
+    final total = recipe?.steps.length ?? 0;
 
     if (recipe == null || total == 0) {
       return 'No active recipe is loaded.';
@@ -828,7 +820,7 @@ class SafeCookAgent {
       '[SafeCook STEP]\n'
       'command="next step"\n'
       'beforeIndex=$stepIdx\n'
-      'contextIndex=${context.currentStepIndex}\n'
+      'contextIndex=${_mem.currentStepIndex}\n'
       'memoryIndexBefore=$memoryIndexBefore\n'
       'toolCalled=true\n'
       'toolResult=${result.success}\n'
@@ -855,8 +847,8 @@ class SafeCookAgent {
     if (!_mem.isCookingActive) {
       return 'Please start cooking first.';
     }
-    final recipe = context.recipe ?? _mem.selectedRecipe;
-    final stepIdx = context.currentStepIndex;
+    final recipe = _mem.selectedRecipe;
+    final stepIdx = _mem.currentStepIndex;
 
     if (recipe == null) return 'No active recipe is loaded.';
 
@@ -872,7 +864,7 @@ class SafeCookAgent {
       '[SafeCook STEP]\n'
       'command="previous step"\n'
       'beforeIndex=$stepIdx\n'
-      'contextIndex=${context.currentStepIndex}\n'
+      'contextIndex=${_mem.currentStepIndex}\n'
       'memoryIndexBefore=$memoryIndexBefore\n'
       'toolCalled=true\n'
       'toolResult=${result.success}\n'
@@ -901,8 +893,8 @@ class SafeCookAgent {
       return 'Please start cooking first.';
     }
     final rawStep = intent.entities['stepNumber'] as int? ?? -1;
-    final recipe = context.recipe ?? _mem.selectedRecipe;
-    final total = context.totalSteps;
+    final recipe = _mem.selectedRecipe;
+    final total = recipe?.steps.length ?? 0;
 
     if (recipe == null || total == 0) return 'No active recipe is loaded.';
 
@@ -916,8 +908,8 @@ class SafeCookAgent {
     debugPrint(
       '[SafeCook STEP]\n'
       'command="go to step"\n'
-      'beforeIndex=${context.currentStepIndex}\n'
-      'contextIndex=${context.currentStepIndex}\n'
+      'beforeIndex=${_mem.currentStepIndex}\n'
+      'contextIndex=${_mem.currentStepIndex}\n'
       'memoryIndexBefore=$memoryIndexBefore\n'
       'toolCalled=true\n'
       'toolResult=${result.success}\n'
@@ -944,8 +936,8 @@ class SafeCookAgent {
     if (!_mem.isCookingActive) {
       return 'You are not currently in a cooking session.';
     }
-    final recipe = context.recipe ?? _mem.selectedRecipe;
-    final stepIdx = context.currentStepIndex;
+    final recipe = _mem.selectedRecipe;
+    final stepIdx = _mem.currentStepIndex;
 
     if (recipe == null) return 'No active recipe is loaded.';
 
@@ -963,7 +955,7 @@ class SafeCookAgent {
   }
 
   String _handleReadIngredients(SafeCookContext context) {
-    final r = context.recipe ?? _mem.selectedRecipe;
+    final r = _mem.selectedRecipe;
     if (r == null) {
       return 'Please select a recipe first before checking ingredients.';
     }
@@ -972,7 +964,7 @@ class SafeCookAgent {
   }
 
   String _handleReadSafetyNotes(SafeCookContext context) {
-    final r = context.recipe ?? _mem.selectedRecipe;
+    final r = _mem.selectedRecipe;
     if (r == null) {
       return 'Please select a recipe first.';
     }

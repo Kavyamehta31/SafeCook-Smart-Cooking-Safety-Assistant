@@ -31,27 +31,19 @@ class GasCalibration {
 // VoiceAssistantContext — snapshot of app state for one command turn.
 // ---------------------------------------------------------------------------
 class VoiceAssistantContext {
-  final Recipe? recipe;
-  final int currentStepIndex;
-  final int totalSteps;
   final int? gasValue;
   final String? distanceValue;
   final double? distanceCm;
   final String safetyState;
   final Duration sessionDuration;
-  final bool isCookingActive;
   final bool isBluetoothConnected;
 
   const VoiceAssistantContext({
-    this.recipe,
-    this.currentStepIndex = 0,
-    this.totalSteps = 0,
     this.gasValue,
     this.distanceValue,
     this.distanceCm,
     required this.safetyState,
     required this.sessionDuration,
-    required this.isCookingActive,
     required this.isBluetoothConnected,
   });
 }
@@ -113,18 +105,13 @@ class VoiceAssistantService {
     }
 
     final agentContext = SafeCookContext(
-      recipe: ctx.recipe,
-      currentStepIndex: ctx.currentStepIndex,
-      totalSteps: ctx.totalSteps,
       gasValue: ctx.gasValue,
       gasPercent: gasPercent,
       distanceValue: ctx.distanceValue,
       distanceCm: distanceCm,
       safetyState: ctx.safetyState,
       sessionDuration: ctx.sessionDuration,
-      isCookingActive: ctx.isCookingActive,
       isBluetoothConnected: ctx.isBluetoothConnected,
-      currentConversationState: SafeCookAgent().conversationState.name,
     );
 
     final agentTools = SafeCookTools(

@@ -111,7 +111,7 @@ class LocalMockAIProvider implements AIProvider {
     // 2. Pronoun resolution of "it" / "that" referring to recipe or step
     if (q.contains('how long') &&
         (q.contains('it take') || q.contains('cook it'))) {
-      final r = context.recipe ?? SafeCookAgent().memory.selectedRecipe;
+      final r = SafeCookAgent().memory.selectedRecipe;
       if (r != null) {
         return AIResponse(
           assistantText:
@@ -125,8 +125,8 @@ class LocalMockAIProvider implements AIProvider {
     if (q.contains('what was that') ||
         q.contains('repeat that') ||
         q.contains('what is that step')) {
-      final r = context.recipe ?? SafeCookAgent().memory.selectedRecipe;
-      final stepIdx = context.currentStepIndex;
+      final r = SafeCookAgent().memory.selectedRecipe;
+      final stepIdx = SafeCookAgent().memory.currentStepIndex;
       if (r != null && stepIdx < r.steps.length) {
         final step = r.steps[stepIdx];
         return AIResponse(
@@ -355,9 +355,9 @@ class GeminiAIProvider implements AIProvider {
           'You answer general cooking questions knowledgeably and conversationally. '
           'You also help users navigate cooking recipes step by step.\n\n'
           'CURRENT APP STATE:\n'
-          '- Cooking active: ${context.isCookingActive}\n'
-          '- Current recipe: ${context.recipe?.name ?? "none"}\n'
-          '- Current step: ${context.isCookingActive ? context.currentStepIndex + 1 : "N/A"}\n'
+          '- Cooking active: ${SafeCookAgent().memory.isCookingActive}\n'
+          '- Current recipe: ${SafeCookAgent().memory.selectedRecipe?.name ?? "none"}\n'
+          '- Current step: ${SafeCookAgent().memory.isCookingActive ? SafeCookAgent().memory.currentStepIndex + 1 : "N/A"}\n'
           '- Safety state: ${context.safetyState}\n\n'
           'IMPORTANT RULES:\n'
           '1. For general cooking questions (e.g. techniques, methods, substitutions, science), '

@@ -445,7 +445,8 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   final List<SensorDataPoint> _distChartData = [];
   
   // Cooking Session State Variables
-  bool _isCookingActive = false;
+  bool get _isCookingActive => SafeCookAgent().memory.isCookingActive;
+  set _isCookingActive(bool val) => SafeCookAgent().memory.isCookingActive = val;
   bool _showSessionSummary = false;
   Timer? _sessionTimer;
   Duration _sessionDuration = Duration.zero;
@@ -1702,14 +1703,10 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
             'processingStarted=true');
 
         final voiceContext = VoiceAssistantContext(
-          recipe: null,
-          currentStepIndex: 0,
-          totalSteps: 0,
           gasValue: _gasValue,
           distanceValue: _distanceValue,
           safetyState: _getCombinedStatus(),
           sessionDuration: _sessionDuration,
-          isCookingActive: _isCookingActive,
           isBluetoothConnected: _connectedDevice != null,
         );
 

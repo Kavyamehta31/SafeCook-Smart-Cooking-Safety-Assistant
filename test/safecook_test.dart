@@ -56,9 +56,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final tools = buildNoOpTools();
 
@@ -81,9 +79,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final tools = buildNoOpTools();
 
@@ -102,9 +98,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final tools = buildNoOpTools();
 
@@ -126,9 +120,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final tools = buildNoOpTools();
 
@@ -150,9 +142,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
 
       var searchIngredient = '';
@@ -196,9 +186,7 @@ void main() {
     final context = const SafeCookContext(
       safetyState: 'SAFE',
       sessionDuration: Duration.zero,
-      isCookingActive: false,
       isBluetoothConnected: false,
-      currentConversationState: 'idle',
     );
     final tools = buildNoOpTools();
     final provider = _RecordingAIProvider();
@@ -221,9 +209,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
 
       var connected = false;
@@ -351,14 +337,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 3,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       final reply = await agent.handleInput('next step', context, stepTools);
@@ -375,14 +356,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 1,
-        totalSteps: 3,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       final reply = await agent.handleInput('go back', context, stepTools);
@@ -399,14 +375,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 1,
-        totalSteps: 3,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       final reply = await agent.handleInput(
@@ -427,14 +398,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 3,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       final reply = await agent.handleInput('go to step 3', context, stepTools);
@@ -451,14 +417,9 @@ void main() {
       // At step 1, previous step should fail/warn
       agent.memory.currentStepIndex = 0;
       final context1 = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 3,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
       final reply1 = await agent.handleInput(
         'previous step',
@@ -471,14 +432,9 @@ void main() {
       // At step 3 (last step), next step should fail/warn
       agent.memory.currentStepIndex = 2;
       final context3 = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 2,
-        totalSteps: 3,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
       final reply3 = await agent.handleInput('next step', context3, stepTools);
       expect(nextStepCount, equals(0));
@@ -520,9 +476,7 @@ void main() {
         final context = const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         );
 
         final reply = await agent.handleInput(
@@ -548,12 +502,9 @@ void main() {
       agent.conversationState = ConversationState.awaitingReadyConfirm;
 
       final context = SafeCookContext(
-        recipe: recipe,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: ConversationState.awaitingReadyConfirm.name,
       );
 
       final reply = await agent.handleInput('yes', context, startTools);
@@ -571,9 +522,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'confirming_start',
       );
 
       final reply = await agent.handleInput('no', context, startTools);
@@ -597,9 +546,7 @@ void main() {
       var context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final tools = SafeCookTools(
         searchRecipes: ({vegetarian, quick, ingredient, rawText, category}) => [
@@ -626,9 +573,7 @@ void main() {
       context = SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: agent.conversationState.name,
       );
       await agent.handleInput('yes', context, tools);
       expect(
@@ -656,12 +601,9 @@ void main() {
       );
 
       context = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: agent.conversationState.name,
       );
 
       await agent.handleInput('yes', context, startTools);
@@ -678,14 +620,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
-        currentStepIndex: 3,
-        totalSteps: 10,
         safetyState: 'SAFE',
         sessionDuration: const Duration(minutes: 15),
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       var ended = false;
@@ -712,14 +649,9 @@ void main() {
 
       // Say yes to finalize
       final finalContext = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
-        currentStepIndex: 3,
-        totalSteps: 10,
         safetyState: 'SAFE',
         sessionDuration: const Duration(minutes: 15),
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'confirming_end',
       );
       final reply2 = await agent.handleInput('yes', finalContext, tools);
       expect(ended, isTrue);
@@ -774,9 +706,7 @@ void main() {
         distanceCm: 45.0,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: true,
-        currentConversationState: 'idle',
       );
       final replySafe = await agent.handleInput(
         'am i too close?',
@@ -791,9 +721,7 @@ void main() {
         distanceCm: 10.0,
         safetyState: 'DISTANCE ALERT',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: true,
-        currentConversationState: 'idle',
       );
       final replyClose = await agent.handleInput(
         'am i too close?',
@@ -808,9 +736,7 @@ void main() {
         distanceCm: null,
         safetyState: 'STANDBY',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: true,
-        currentConversationState: 'idle',
       );
       final replyNoEcho = await agent.handleInput(
         'am i too close?',
@@ -831,14 +757,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
-        currentStepIndex: 4,
-        totalSteps: 10,
         safetyState: 'GAS ALERT', // safety warning
         sessionDuration: const Duration(minutes: 5),
-        isCookingActive: true,
         isBluetoothConnected: true,
-        currentConversationState: 'cooking',
       );
 
       final tools = buildNoOpTools();
@@ -867,9 +788,7 @@ void main() {
           distanceValue: null,
           safetyState: 'STANDBY',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         );
         final replyGas = await agent.handleInput(
           'check gas level',
@@ -928,14 +847,9 @@ void main() {
         agent.conversationState = ConversationState.cooking;
 
         final context = SafeCookContext(
-          recipe: kPredefinedRecipes.first,
-          currentStepIndex: 1,
-          totalSteps: 10,
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: true,
           isBluetoothConnected: false,
-          currentConversationState: 'cooking',
         );
 
         // 1. Next step
@@ -1035,14 +949,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       final reply = await agent.handleInput('next step', context, stepTools);
@@ -1059,14 +968,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 1,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('next step', context, stepTools);
@@ -1082,14 +986,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 2,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('previous step', context, stepTools);
@@ -1105,14 +1004,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 1,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('previous step', context, stepTools);
@@ -1128,14 +1022,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('previous step', context, stepTools);
@@ -1151,14 +1040,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 1,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('repeat', context, stepTools);
@@ -1174,14 +1058,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 2,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('go to step 1', context, stepTools);
@@ -1197,14 +1076,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('go to step 3', context, stepTools);
@@ -1220,14 +1094,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('go to step five', context, stepTools);
@@ -1243,14 +1112,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('jump to step 2', context, stepTools);
@@ -1266,14 +1130,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: dummyRecipe,
-        currentStepIndex: 0,
-        totalSteps: 5,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('go to step 999', context, stepTools);
@@ -1284,7 +1143,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "what's next",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.nextStep));
     });
@@ -1293,7 +1151,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "go ahead",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.nextStep));
     });
@@ -1302,7 +1159,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "go back",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.previousStep));
     });
@@ -1311,7 +1167,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "repeat that",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.readStep));
     });
@@ -1320,7 +1175,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "take me to step three",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.goToStep));
       expect(intent.entities['stepNumber'], equals(3));
@@ -1330,7 +1184,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "end cooking",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.endCooking));
     });
@@ -1339,7 +1192,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "and cooking",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.endCooking));
     });
@@ -1348,7 +1200,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "finish cooking",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.endCooking));
     });
@@ -1357,7 +1208,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "I'm done cooking",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.endCooking));
     });
@@ -1366,7 +1216,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         "that's all",
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, equals(SafeCookIntentType.endCooking));
     });
@@ -1414,14 +1263,9 @@ void main() {
         agent.conversationState = ConversationState.cooking;
 
         final context = SafeCookContext(
-          recipe: kPredefinedRecipes.first,
-          currentStepIndex: 0,
-          totalSteps: 5,
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: true,
           isBluetoothConnected: false,
-          currentConversationState: 'cooking',
         );
 
         // Simulating a speech listener that fires twice
@@ -1717,9 +1561,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'selecting_recipe',
       );
       SafeCookAgent().memory.lastRecipeSearchResults = List.from(
         kPredefinedRecipes,
@@ -1741,9 +1583,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'selecting_recipe',
       );
       SafeCookAgent().memory.lastRecipeSearchResults = List.from(
         kPredefinedRecipes,
@@ -1763,13 +1603,11 @@ void main() {
     test('6. Pronoun "it" time check resolution', () async {
       final provider = LocalMockAIProvider();
       final recipe = kPredefinedRecipes.first;
+      SafeCookAgent().memory.selectedRecipe = recipe;
       final context = SafeCookContext(
-        recipe: recipe,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
       final response = await provider.generateResponse(
         prompt: 'how long does it take?',
@@ -1784,15 +1622,12 @@ void main() {
     test('7. Pronoun "that" step check resolution', () async {
       final provider = LocalMockAIProvider();
       final recipe = kPredefinedRecipes.first;
+      SafeCookAgent().memory.selectedRecipe = recipe;
+      SafeCookAgent().memory.currentStepIndex = 1;
       final context = SafeCookContext(
-        recipe: recipe,
-        currentStepIndex: 1,
-        totalSteps: recipe.steps.length,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
       final response = await provider.generateResponse(
         prompt: 'what was that step?',
@@ -1815,9 +1650,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1831,9 +1664,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1847,9 +1678,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1863,9 +1692,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1879,9 +1706,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1895,9 +1720,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1911,9 +1734,7 @@ void main() {
         context: const SafeCookContext(
           safetyState: 'SAFE',
           sessionDuration: Duration.zero,
-          isCookingActive: false,
           isBluetoothConnected: false,
-          currentConversationState: 'idle',
         ),
         memory: SafeCookConversationMemory(),
       );
@@ -1928,9 +1749,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final reply = await agent.handleInput(
         'what can I replace paneer with?',
@@ -1950,9 +1769,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final reply = await agent.handleInput(
         'how is the gas level right now?',
@@ -1976,9 +1793,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final reply = await agent.handleInput(
         'am I too close to the vessel?',
@@ -1998,9 +1813,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       await agent.handleInput(
         'connect the stove sensor',
@@ -2019,9 +1832,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final reply = await agent.handleInput(
         'is the stove safe right now?',
@@ -2049,9 +1860,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
       final reply = await agent.handleInput(
         'unknown conversational request',
@@ -2080,14 +1889,9 @@ void main() {
       );
 
       final context = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
-        currentStepIndex: 0,
-        totalSteps: kPredefinedRecipes.first.steps.length,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       var nextCalled = false;
@@ -2134,14 +1938,9 @@ void main() {
       );
 
       final context = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
-        currentStepIndex: 0,
-        totalSteps: kPredefinedRecipes.first.steps.length,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       var goToStepNum = -1;
@@ -2187,9 +1986,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'selecting_recipe',
       );
 
       final reply = await agent.handleInput(
@@ -2219,9 +2016,7 @@ void main() {
       final context = const SafeCookContext(
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: false,
         isBluetoothConnected: false,
-        currentConversationState: 'idle',
       );
 
       var calledSearch = false;
@@ -2264,14 +2059,9 @@ void main() {
       agent.conversationState = ConversationState.cooking;
 
       final context = SafeCookContext(
-        recipe: kPredefinedRecipes.first,
-        currentStepIndex: 0,
-        totalSteps: kPredefinedRecipes.first.steps.length,
         safetyState: 'SAFE',
         sessionDuration: Duration.zero,
-        isCookingActive: true,
         isBluetoothConnected: false,
-        currentConversationState: 'cooking',
       );
 
       await agent.handleInput('next step', context, buildNoOpTools());
@@ -2286,20 +2076,13 @@ void main() {
     SafeCookContext idleCtx() => const SafeCookContext(
       safetyState: 'SAFE',
       sessionDuration: Duration.zero,
-      isCookingActive: false,
       isBluetoothConnected: false,
-      currentConversationState: 'idle',
     );
 
     SafeCookContext cookingCtx() => SafeCookContext(
-      recipe: kPredefinedRecipes.first,
-      currentStepIndex: 0,
-      totalSteps: kPredefinedRecipes.first.steps.length,
       safetyState: 'SAFE',
       sessionDuration: Duration.zero,
-      isCookingActive: true,
       isBluetoothConnected: true,
-      currentConversationState: 'cooking',
     );
 
     SafeCookTools noOp() => buildNoOpTools();
@@ -2329,7 +2112,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         'Is the gas okay?',
         conversationState: 'idle',
-        isCookingActive: false,
       );
       expect(intent.type, SafeCookIntentType.checkGas);
     });
@@ -2351,7 +2133,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         'Is the stove safe?',
         conversationState: 'idle',
-        isCookingActive: false,
       );
       expect(intent.type, SafeCookIntentType.checkSafety);
     });
@@ -2361,7 +2142,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         'Am I in danger?',
         conversationState: 'idle',
-        isCookingActive: false,
       );
       expect(intent.type, SafeCookIntentType.checkSafety);
     });
@@ -2371,7 +2151,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         'Am I too close to the stove?',
         conversationState: 'cooking',
-        isCookingActive: true,
       );
       expect(intent.type, SafeCookIntentType.checkDistance);
     });
@@ -2457,7 +2236,6 @@ void main() {
       final intent = SafeCookNLU.parse(
         'Give me three recipes.',
         conversationState: 'idle',
-        isCookingActive: false,
       );
       expect(intent.type, SafeCookIntentType.findRecipe);
       expect(intent.entities['count'], 3);
@@ -2621,3 +2399,4 @@ class _MockRespondingAIProvider implements AIProvider {
     return response;
   }
 }
+
