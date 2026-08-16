@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/recipe.dart';
+import '../services/preference_service.dart';
 
-class RecipeDetailScreen extends StatelessWidget {
+class RecipeDetailScreen extends StatefulWidget {
   final Recipe recipe;
   
   const RecipeDetailScreen({
@@ -10,10 +11,30 @@ class RecipeDetailScreen extends StatelessWidget {
   });
 
   @override
+  State<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
+}
+
+class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
+  @override
   Widget build(BuildContext context) {
+    final recipe = widget.recipe;
+    final isFav = PreferenceService().isFavorite(recipe.id);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(recipe.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: Icon(
+              isFav ? Icons.favorite : Icons.favorite_border,
+              color: isFav ? Colors.redAccent : Colors.white,
+            ),
+            onPressed: () async {
+              await PreferenceService().setFavorite(recipe.id, !isFav);
+              setState(() {});
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),

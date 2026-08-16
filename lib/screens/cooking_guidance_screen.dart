@@ -13,6 +13,7 @@ import '../agent/safecook_tools.dart';
 import '../safety/safecook_safety_state.dart';
 import '../safety/safecook_safety_event.dart';
 import '../safety/safecook_safety_voice_controller.dart';
+import '../services/preference_service.dart';
 
 class CookingGuidanceScreen extends StatefulWidget {
   final Recipe recipe;
@@ -72,6 +73,12 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> implements
     SafeCookAgent().conversationState = ConversationState.cooking;
     SafeCookAgent().memory.isCookingActive = true;
     SafeCookAgent().confirmStepIndex(0);
+
+    if (!SafeCookAgent().memory.isSessionCounted) {
+      PreferenceService().incrementCookCount(widget.recipe.id);
+      PreferenceService().setLastCookedRecipeId(widget.recipe.id);
+      SafeCookAgent().memory.isSessionCounted = true;
+    }
 
     // Speak step 1 and then start listening
     WidgetsBinding.instance.addPostFrameCallback((_) {

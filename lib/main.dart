@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/recipe.dart';
+import 'data/recipes.dart';
 import 'screens/recipe_list_screen.dart';
 import 'screens/cooking_guidance_screen.dart';
 import 'services/speech_service.dart';
@@ -16,6 +17,7 @@ import 'safety/safecook_safety_engine.dart';
 import 'safety/safecook_safety_state.dart';
 import 'safety/safecook_safety_event.dart';
 import 'safety/safecook_safety_voice_controller.dart';
+import 'services/preference_service.dart';
 
 // SafeCook Safety Thresholds
 const int kGasNormalMax = 300;     // Gas levels < 300 are Normal
@@ -24,7 +26,9 @@ const int kGasWarningMax = 600;    // Gas levels 300 to 599 are Warning, >= 600 
 const double kDistanceSafeMin = 30.0;    // Distance > 30 cm is Safe
 const double kDistanceWarningMin = 15.0; // Distance 15 to 30 cm is Close, < 15 cm is Very Close
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await PreferenceService().init();
   runApp(const SafeCookBluetoothTestApp());
 }
 
@@ -1735,7 +1739,10 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                 ),
               ),
             ).then((_) {
-              if (mounted) _startWakeWordDetection();
+              if (mounted) {
+                _startWakeWordDetection();
+                setState(() {});
+              }
             });
             return const ToolResult.ok('Navigation to cooking screen initiated');
           },
@@ -2000,7 +2007,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                                   if (selectedRecipe != null && mounted) {
                                     _startCookingSession();
                                     if (!context.mounted) return;
-                                    Navigator.push(
+                                    await Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) => CookingGuidanceScreen(
@@ -2009,6 +2016,9 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                                         ),
                                       ),
                                     );
+                                    if (mounted) {
+                                      setState(() {});
+                                    }
                                   }
                                 },
                                 style: ElevatedButton.styleFrom(
@@ -2282,6 +2292,8 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                 ),
               ),
               
+              _buildUserPreferences(),
+              
               _buildCookingSessionControl(),
               
               // 4. Sensor Dashboard
@@ -2296,6 +2308,96 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       ),
     );
   }
+
+  Widget _buildUserPreferences() {
+    final lastCookedId = PreferenceService().getLastCookedRecipeId();
+    final lastCookedRecipe = lastCookedId != null
+        ? kPredefinedRecipes.firstWhere((r) => r.id == lastCookedId, orElse: () => kPredefinedRecipes.first)
+        : null;
+    final isVeg = PreferenceService().isVegetarian();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+      child: Card(
+        color: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.person_outline, color: Color(0xFF38BDF8), size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'User Preferences',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white10, height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vegetarian Mode Only', style: TextStyle(fontSize: 13, color: Colors.white70)),
+                value: isVeg,
+                activeThumbColor: const Color(0xFF10B981),
+                onChanged: (val) async {
+                  await PreferenceService().setVegetarian(val);
+                  setState(() {});
+                },
+              ),
+              if (lastCookedRecipe != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('LAST COOKED RECIPE', style: TextStyle(fontSize: 9, color: Colors.white30, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          Text(lastCookedRecipe.name, style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        _startCookingSession();
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => CookingGuidanceScreen(
+                              recipe: lastCookedRecipe,
+                              homeState: this,
+                            ),
+                          ),
+                        );
+                        if (mounted) {
+                          setState(() {});
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0EA5E9),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('COOK AGAIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildDashboard() {
     final status = _getCombinedStatus();
     String explanation;

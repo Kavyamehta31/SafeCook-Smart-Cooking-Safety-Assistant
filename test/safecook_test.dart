@@ -11,6 +11,12 @@ import 'package:safecook_bluetooth_test/data/recipes.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_engine.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_state.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_event.dart';
+import 'package:safecook_bluetooth_test/services/preference_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
+import 'package:safecook_bluetooth_test/main.dart';
+import 'package:safecook_bluetooth_test/screens/cooking_guidance_screen.dart';
+import 'package:safecook_bluetooth_test/safety/safecook_safety_policy.dart';
 
 class _RecordingAIProvider implements AIProvider {
   _RecordingAIProvider({AIResponse? response})
@@ -2360,6 +2366,178 @@ void main() {
       agent.memory.conversationState = ConversationState.cooking;
       final reply = await agent.handleInput('next step', cookingCtx(), noOp());
       expect(reply.toLowerCase(), isNot(contains("i'm not sure about that")));
+    });
+
+    group('Phase 6: Persistent User Preferences Tests', () {
+      setUp(() async {
+        SharedPreferences.setMockInitialValues({});
+        await PreferenceService().resetForTesting();
+      });
+
+      test('P1. PreferenceService default values', () async {
+        final prefs = PreferenceService();
+        expect(prefs.isVegetarian(), isFalse);
+        expect(prefs.getFavoriteRecipeIds(), isEmpty);
+        expect(prefs.getLastCookedRecipeId(), isNull);
+        expect(prefs.getCookCount('imc_1'), 0);
+      });
+
+      test('P2. Toggle and persist favorites', () async {
+        final prefs = PreferenceService();
+        expect(prefs.isFavorite('imc_1'), isFalse);
+
+        await prefs.setFavorite('imc_1', true);
+        expect(prefs.isFavorite('imc_1'), isTrue);
+        expect(prefs.getFavoriteRecipeIds(), contains('imc_1'));
+
+        await prefs.setFavorite('imc_1', false);
+        expect(prefs.isFavorite('imc_1'), isFalse);
+        expect(prefs.getFavoriteRecipeIds(), isNot(contains('imc_1')));
+      });
+
+      test('P3. Vegetarian preference updates', () async {
+        final prefs = PreferenceService();
+        await prefs.setVegetarian(true);
+        expect(prefs.isVegetarian(), isTrue);
+
+        SharedPreferences.setMockInitialValues({'safecook_vegetarian': false});
+        await PreferenceService().resetForTesting();
+        expect(PreferenceService().isVegetarian(), isFalse);
+      });
+
+      test('P4. Last cooked recipe updates', () async {
+        final prefs = PreferenceService();
+        await prefs.setLastCookedRecipeId('imc_3');
+        expect(prefs.getLastCookedRecipeId(), equals('imc_3'));
+      });
+
+      test('P5. Cook counts increment and persist independently', () async {
+        final prefs = PreferenceService();
+        expect(prefs.getCookCount('imc_1'), 0);
+        expect(prefs.getCookCount('imc_2'), 0);
+
+        await prefs.incrementCookCount('imc_1');
+        await prefs.incrementCookCount('imc_1');
+        await prefs.incrementCookCount('imc_2');
+
+        expect(prefs.getCookCount('imc_1'), 2);
+        expect(prefs.getCookCount('imc_2'), 1);
+      });
+
+      testWidgets('P6. Exactly-once cook count updates and rebuild guard', (WidgetTester tester) async {
+        BluetoothTestPage.isTesting = true;
+        SharedPreferences.setMockInitialValues({});
+        await PreferenceService().resetForTesting();
+        final recipe = kPredefinedRecipes.first;
+
+        await tester.pumpWidget(const SafeCookBluetoothTestApp());
+        await tester.pumpAndSettle();
+        final homeState = tester.state<BluetoothTestPageState>(find.byType(BluetoothTestPage));
+        final context = tester.element(find.byType(BluetoothTestPage));
+
+        // 1. First push: fresh session. should increment from 0 to 1
+        SafeCookAgent().reset();
+        expect(PreferenceService().getCookCount(recipe.id), 0);
+
+        // Production simulation: isCookingActive is set to true BEFORE pushing screen
+        SafeCookAgent().memory.isCookingActive = true;
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CookingGuidanceScreen(
+              recipe: recipe,
+              homeState: homeState,
+              startSilently: true,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(PreferenceService().getCookCount(recipe.id), 1);
+        expect(PreferenceService().getLastCookedRecipeId(), recipe.id);
+
+        // 2. Rebuild the screen: verify it does NOT increment again
+        final state = tester.state<CookingGuidanceScreenState>(find.byType(CookingGuidanceScreen));
+        // ignore: invalid_use_of_protected_member
+        state.setState(() {});
+        await tester.pump();
+        expect(PreferenceService().getCookCount(recipe.id), 1);
+
+        // 3. Re-entering/re-creating the screen for the SAME active session:
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CookingGuidanceScreen(
+              recipe: recipe,
+              homeState: homeState,
+              startSilently: true,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(PreferenceService().getCookCount(recipe.id), 1);
+
+        Navigator.pop(context);
+        await tester.pumpAndSettle();
+
+        // 4. Pop the cooking screen to return to dashboard
+        Navigator.pop(context);
+        await tester.pumpAndSettle();
+        
+        // Trigger setState on homeState since we pushed navigation manually in the test
+        // ignore: invalid_use_of_protected_member
+        homeState.setState(() {});
+        await tester.pumpAndSettle();
+        
+        // When we pop and return to dashboard, isCookingActive is false (ended)
+        expect(SafeCookAgent().memory.isCookingActive, isFalse);
+
+        // Verify that returning to the dashboard refreshed the Last Cooked display in the widget tree
+        expect(find.text('LAST COOKED RECIPE'), findsOneWidget);
+        expect(find.text(recipe.name), findsOneWidget);
+
+        // 5. Start a NEW session: should increment to 2
+        SafeCookAgent().memory.isCookingActive = true;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CookingGuidanceScreen(
+              recipe: recipe,
+              homeState: homeState,
+              startSilently: true,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(PreferenceService().getCookCount(recipe.id), 2);
+
+        Navigator.pop(context);
+        await tester.pumpAndSettle();
+      });
+
+      test('P7. Preferences do not affect SafetyEngine behavior', () async {
+        SharedPreferences.setMockInitialValues({'safecook_vegetarian': true});
+        await PreferenceService().resetForTesting();
+        final engine = SafeCookSafetyEngine()..reset();
+        
+        expect(SafeCookSafetyPolicy.gasCautionThreshold, isNotNull);
+        expect(SafeCookSafetyPolicy.gasCriticalThreshold, isNotNull);
+        
+        engine.updateSensorData(
+          gasPercentage: 15.0,
+          chefDistanceCm: 50.0,
+          isBluetoothConnected: true,
+        );
+        expect(engine.currentState, equals(SafeCookSafetyState.safe));
+        
+        engine.updateSensorData(
+          gasPercentage: 45.0,
+          chefDistanceCm: 50.0,
+          isBluetoothConnected: true,
+        );
+        expect(engine.currentState, equals(SafeCookSafetyState.caution));
+      });
     });
   });
 }

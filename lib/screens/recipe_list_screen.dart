@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data/recipes.dart';
 import 'recipe_detail_screen.dart';
+import '../services/preference_service.dart';
 
 class RecipeListScreen extends StatefulWidget {
   const RecipeListScreen({super.key});
@@ -13,9 +14,11 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedCategory = 'All';
   String _searchQuery = '';
+  bool _vegetarianOnly = PreferenceService().isVegetarian();
 
   final List<String> _categories = [
     'All',
+    'Favourites',
     'Breakfast',
     'Indian Main Course',
     'Rice & Biryani',
@@ -34,7 +37,27 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
   @override
   Widget build(BuildContext context) {
     final filteredRecipes = kPredefinedRecipes.where((recipe) {
-      final matchesCategory = _selectedCategory == 'All' || recipe.category == _selectedCategory;
+      if (_vegetarianOnly) {
+        final nonVegKeywords = [
+          'chicken', 'egg', 'fish', 'mutton', 'prawn', 'meat', 'lamb'
+        ];
+        final nameLower = recipe.name.toLowerCase();
+        final descLower = recipe.description.toLowerCase();
+        final isNonVeg = nonVegKeywords.any(
+          (kw) => nameLower.contains(kw) || descLower.contains(kw),
+        );
+        if (isNonVeg) return false;
+      }
+
+      bool matchesCategory = false;
+      if (_selectedCategory == 'All') {
+        matchesCategory = true;
+      } else if (_selectedCategory == 'Favourites') {
+        matchesCategory = PreferenceService().isFavorite(recipe.id);
+      } else {
+        matchesCategory = recipe.category == _selectedCategory;
+      }
+
       final matchesSearch = recipe.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           recipe.ingredients.any((ing) => ing.toLowerCase().contains(_searchQuery.toLowerCase()));
       return matchesCategory && matchesSearch;
@@ -43,6 +66,23 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Select Recipe', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          Row(
+            children: [
+              const Text('Veg Only', style: TextStyle(fontSize: 12, color: Colors.white70)),
+              Switch(
+                value: _vegetarianOnly,
+                activeThumbColor: const Color(0xFF10B981),
+                onChanged: (val) async {
+                  await PreferenceService().setVegetarian(val);
+                  setState(() {
+                    _vegetarianOnly = val;
+                  });
+                },
+              ),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -194,8 +234,23 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
                               ),
                               const SizedBox(height: 12),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
+                                  IconButton(
+                                    icon: Icon(
+                                      PreferenceService().isFavorite(recipe.id)
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      color: PreferenceService().isFavorite(recipe.id)
+                                          ? Colors.redAccent
+                                          : Colors.white54,
+                                    ),
+                                    onPressed: () async {
+                                      final isFav = PreferenceService().isFavorite(recipe.id);
+                                      await PreferenceService().setFavorite(recipe.id, !isFav);
+                                      setState(() {});
+                                    },
+                                  ),
                                   ElevatedButton(
                                     onPressed: () async {
                                       final result = await Navigator.push(
@@ -204,6 +259,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
                                           builder: (context) => RecipeDetailScreen(recipe: recipe),
                                         ),
                                       );
+                                      setState(() {});
                                       if (result != null && context.mounted) {
                                         Navigator.pop(context, result);
                                       }

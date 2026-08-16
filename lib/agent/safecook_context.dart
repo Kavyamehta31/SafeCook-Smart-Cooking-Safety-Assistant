@@ -78,6 +78,7 @@ class SafeCookSessionMemory {
 
   // Session flags
   bool isCookingActive = false;
+  bool isSessionCounted = false;
 
   // Live sensor snapshot — updated from context on every handleInput call.
   int? gasValue;
@@ -103,6 +104,7 @@ class SafeCookSessionMemory {
     lastRecipeSearchResults.clear();
     currentStepIndex = 0;
     isCookingActive = false;
+    isSessionCounted = false;
     lastUserRequest = null;
     lastAssistantResponse = null;
     pendingWebQuery = null;
