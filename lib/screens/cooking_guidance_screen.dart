@@ -10,6 +10,9 @@ import '../services/wake_word_service.dart';
 import '../agent/safecook_agent.dart';
 import '../agent/safecook_context.dart';
 import '../agent/safecook_tools.dart';
+import '../safety/safecook_safety_state.dart';
+import '../safety/safecook_safety_event.dart';
+import '../safety/safecook_safety_voice_controller.dart';
 
 class CookingGuidanceScreen extends StatefulWidget {
   final Recipe recipe;
@@ -27,7 +30,7 @@ class CookingGuidanceScreen extends StatefulWidget {
   State<CookingGuidanceScreen> createState() => CookingGuidanceScreenState();
 }
 
-class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
+class CookingGuidanceScreenState extends State<CookingGuidanceScreen> implements SafetyVoiceDelegate {
   // -------------------------------------------------------------------------
   // Step navigation — this is the AUTHORITATIVE index for the UI.
   // Every change calls SafeCookAgent().confirmStepIndex(idx) to keep the
@@ -50,12 +53,19 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
   final WakeWordService _wakeWordService = WakeWordService();
 
   // Safety tracking
-  String _lastGuidanceSafetyState = 'STANDBY';
+  String? _lastSpokenText;
+
+  // Interruption tracking fields
+  String? _interruptedText;
+  bool _wasListeningBeforeAlert = false;
+  int _interruptedStepIndex = -1;
+  String _interruptedConvState = '';
 
   @override
   void initState() {
     super.initState();
     widget.homeState.addSensorListener(onSensorUpdate);
+    SafetyVoiceController().registerCookingScreen(this);
 
     // Seed agent with this recipe and cooking state
     SafeCookAgent().selectedRecipe = widget.recipe;
@@ -78,6 +88,7 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
   @override
   void dispose() {
     widget.homeState.removeSensorListener(onSensorUpdate);
+    SafetyVoiceController().unregisterCookingScreen(this);
     // Clear TTS callback FIRST to prevent any pending callbacks from firing
     _voiceService.setCompletionCallback(null);
     _voiceService.stop();
@@ -92,47 +103,97 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
   // Sensor safety interrupt — must not cause double listening
   // -------------------------------------------------------------------------
   void onSensorUpdate() {
+    // Stub kept for compatibility/rebuild notifications
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void handleSafetyVoiceEvent(SafeCookSafetyEvent event) {
     if (!mounted) return;
-    final newState = widget.homeState.currentSafetyState;
-    if (newState == _lastGuidanceSafetyState) return;
 
-    final oldState = _lastGuidanceSafetyState;
-    _lastGuidanceSafetyState = newState;
+    final newState = event.currentState;
+    final oldState = event.previousState;
 
-    String? alertMessage;
-    if (newState == 'CRITICAL') {
-      alertMessage = 'Critical warning! Please check the stove area immediately.';
-    } else if (newState == 'GAS ALERT') {
-      alertMessage = 'Warning. The gas level is high. Please check the stove environment.';
-    } else if (newState == 'DISTANCE ALERT') {
-      alertMessage =
-          'Warning. You are too close to the cooking vessel. Please step back.';
-    } else if (newState == 'CAUTION') {
-      alertMessage = 'Caution. Elevated risk detected.';
-    } else if (newState == 'SAFE' &&
-        (oldState == 'CAUTION' ||
-            oldState == 'GAS ALERT' ||
-            oldState == 'DISTANCE ALERT' ||
-            oldState == 'CRITICAL')) {
-      alertMessage = 'The cooking environment is now safe again.';
+    String? voiceMsg;
+    bool isAlert = false;
+
+    if (newState == SafeCookSafetyState.critical) {
+      voiceMsg = newState.voiceMessage;
+      isAlert = true;
+    } else if (newState == SafeCookSafetyState.gasAlert) {
+      voiceMsg = newState.voiceMessage;
+      isAlert = true;
+    } else if (newState == SafeCookSafetyState.distanceAlert) {
+      voiceMsg = newState.voiceMessage;
+      isAlert = true;
+    } else if (newState == SafeCookSafetyState.caution) {
+      voiceMsg = newState.voiceMessage;
+      isAlert = true;
+    } else if (newState == SafeCookSafetyState.sensorUnavailable) {
+      if (oldState != SafeCookSafetyState.sensorUnavailable) {
+        voiceMsg = newState.voiceMessage;
+        isAlert = true;
+      }
+    } else if (newState == SafeCookSafetyState.safe) {
+      if (oldState == SafeCookSafetyState.critical ||
+          oldState == SafeCookSafetyState.gasAlert ||
+          oldState == SafeCookSafetyState.distanceAlert ||
+          oldState == SafeCookSafetyState.caution ||
+          oldState == SafeCookSafetyState.sensorUnavailable) {
+        voiceMsg = newState.voiceMessage;
+      }
     }
 
-    if (alertMessage != null) {
-      // Stop mic listening during safety alert speech to prevent feedback loop
-      _speechService.stopListening();
-      _wakeWordService.stopWakeWordDetection();
+    if (voiceMsg != null) {
+      if (isAlert) {
+        // Capture context for interruption
+        _wasListeningBeforeAlert = _speechService.isListening;
+        _interruptedStepIndex = currentStepIndex;
+        _interruptedConvState = SafeCookAgent().conversationState.name;
+        _interruptedText = _voiceService.isSpeaking ? _lastSpokenText : null;
 
-      // Phase 0 fix: clear callback BEFORE stopping to prevent race condition
-      _voiceService.setCompletionCallback(null);
-      _voiceService.stop();
+        // Stop TTS and microphone immediately
+        _speechService.stopListening();
+        _wakeWordService.stopWakeWordDetection();
+        _voiceService.setCompletionCallback(null);
+        _voiceService.stop();
+      }
+
+      // Speak safety warning
       _voiceService.setCompletionCallback(() {
         _voiceService.setCompletionCallback(null);
-        _startVoiceCommandListening();
+        _resumeInterruptedState();
       });
-      _voiceService.speak(alertMessage);
+      _voiceService.speak(voiceMsg);
     }
 
     if (mounted) setState(() {});
+  }
+
+  void _resumeInterruptedState() {
+    if (!mounted) return;
+
+    final cookingStillActive = widget.homeState.isCookingActive;
+    if (cookingStillActive &&
+        _interruptedStepIndex == currentStepIndex &&
+        _interruptedConvState == SafeCookAgent().conversationState.name) {
+      
+      if (_interruptedText != null && _interruptedText!.isNotEmpty) {
+        _voiceService.setCompletionCallback(() {
+          _voiceService.setCompletionCallback(null);
+          if (_wasListeningBeforeAlert) {
+            _startVoiceCommandListening();
+          }
+        });
+        _voiceService.speak(_interruptedText!);
+      } else if (_wasListeningBeforeAlert) {
+        _startVoiceCommandListening();
+      } else {
+        _startVoiceCommandListening();
+      }
+    } else {
+      _startVoiceCommandListening();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -152,7 +213,7 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
           _voiceService.setCompletionCallback(null);
           _startVoiceCommandListening();
         });
-        await _voiceService.speak('Hello! What would you like to do?');
+        await _speakAndTrack('Hello! What would you like to do?');
       },
     );
   }
@@ -184,7 +245,7 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
             });
           }
           _voiceService.setCompletionCallback(null);
-          await _voiceService.speak(
+          await _speakAndTrack(
               "I'll wait here. Say Hello SafeCook when you need me.");
           _startWakeWordDetection();
         } else {
@@ -308,7 +369,7 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
           }
         });
 
-        await _voiceService.speak(reply);
+        await _speakAndTrack(reply);
       },
     );
   }
@@ -323,6 +384,11 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
   // -------------------------------------------------------------------------
   RecipeStep get currentStep => widget.recipe.steps[currentStepIndex];
 
+  Future<void> _speakAndTrack(String text) async {
+    _lastSpokenText = text;
+    await _voiceService.speak(text);
+  }
+
   void speakCurrentStep({bool speak = true}) {
     if (!speak) return;
     _voiceService.setCompletionCallback(null);
@@ -330,7 +396,7 @@ class CookingGuidanceScreenState extends State<CookingGuidanceScreen> {
       _voiceService.setCompletionCallback(null);
       _startVoiceCommandListening();
     });
-    _voiceService.speak(currentStep.voiceInstruction);
+    _speakAndTrack(currentStep.voiceInstruction);
   }
 
   void goToNextStep({bool speak = true}) {

@@ -178,6 +178,7 @@ void main() {
     state.testSetStepIndex(2);
 
     // Simulate safety transition on home state using simulateSensorData helper
+    homeState.connectedDeviceForTesting = BluetoothDevice(name: 'HC-05', address: 'FA:B8:03:6B:1F:57', bondState: 'bonded');
     homeState.simulateSensorData('GAS:600,DIST:50.00');
     await tester.pump();
 

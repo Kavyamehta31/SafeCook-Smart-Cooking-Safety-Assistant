@@ -12,6 +12,10 @@ import 'services/wake_word_service.dart';
 import 'agent/safecook_agent.dart';
 import 'agent/safecook_context.dart';
 import 'agent/safecook_tools.dart';
+import 'safety/safecook_safety_engine.dart';
+import 'safety/safecook_safety_state.dart';
+import 'safety/safecook_safety_event.dart';
+import 'safety/safecook_safety_voice_controller.dart';
 
 // SafeCook Safety Thresholds
 const int kGasNormalMax = 300;     // Gas levels < 300 are Normal
@@ -163,11 +167,12 @@ class BluetoothTestPage extends StatefulWidget {
   State<BluetoothTestPage> createState() => BluetoothTestPageState();
 }
 
-class BluetoothTestPageState extends State<BluetoothTestPage> {
+class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyVoiceDelegate {
   static const _methodChannel = MethodChannel('com.safecook.bluetooth/methods');
   static const _eventChannel = EventChannel('com.safecook.bluetooth/events');
   
   StreamSubscription? _eventChannelSub;
+  StreamSubscription? _safetySubscription;
 
   ClassicAdapterState _adapterState = ClassicAdapterState.unknown;
   
@@ -211,6 +216,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   int? get currentGasValue => _gasValue;
   String? get currentDistanceValue => _distanceValue;
   bool get isBluetoothConnected => _connectedDevice != null;
+  bool get isCookingActive => _isCookingActive;
   String get currentSafetyState => _getCombinedStatus();
   Color get currentSafetyColor => _getCombinedStatusColor();
   Color get currentSafetyBgColor => _getCombinedStatusBgColor();
@@ -219,6 +225,11 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   @visibleForTesting
   set bondedDevicesForTesting(List<BluetoothDevice> devices) {
     _bondedDevices = devices;
+  }
+
+  @visibleForTesting
+  set connectedDeviceForTesting(BluetoothDevice? device) {
+    _connectedDevice = device;
   }
 
   void endCookingSessionOutside() {
@@ -429,7 +440,6 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   String _gasStatus = 'Unknown';
   String _distanceStatus = 'Unknown';
   String _incomingAccumulator = '';
-  String _lastSafetyState = 'STANDBY';
   final List<SafetyEvent> _safetyHistory = [];
   final List<SensorDataPoint> _gasChartData = [];
   final List<SensorDataPoint> _distChartData = [];
@@ -487,6 +497,37 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   void initState() {
     super.initState();
     _resetDashboard();
+    
+    SafetyVoiceController().registerHomeScreen(this);
+    _safetySubscription = SafeCookSafetyEngine().onSafetyEvent.listen((event) {
+      if (mounted) {
+        setState(() {
+          final newEvent = SafetyEvent(
+            timestamp: event.timestamp,
+            state: _mapStateToString(event.currentState),
+            gasValue: _gasValue,
+            distanceValue: _distanceValue,
+          );
+          _safetyHistory.insert(0, newEvent);
+          if (_safetyHistory.length > 50) {
+            _safetyHistory.removeLast();
+          }
+          if (_isCookingActive) {
+            _sessionSafetyHistory.add(newEvent);
+            if (event.currentState == SafeCookSafetyState.caution) _sessionCautionCount++;
+            if (event.currentState == SafeCookSafetyState.gasAlert) _sessionGasAlertCount++;
+            if (event.currentState == SafeCookSafetyState.distanceAlert) _sessionDistanceAlertCount++;
+            if (event.currentState == SafeCookSafetyState.critical) _sessionCriticalCount++;
+          }
+        });
+        
+        final stateStr = _mapStateToString(event.currentState);
+        if (event.currentState != SafeCookSafetyState.safe && event.currentState != SafeCookSafetyState.sensorUnavailable) {
+          _triggerVibrationAndSound(stateStr);
+        }
+      }
+    });
+
     if (!BluetoothTestPage.isTesting) {
       _initBluetooth();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -495,8 +536,35 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
       });
     }
   }
+
+  String _mapStateToString(SafeCookSafetyState state) {
+    switch (state) {
+      case SafeCookSafetyState.safe:
+        return 'SAFE';
+      case SafeCookSafetyState.caution:
+        return 'CAUTION';
+      case SafeCookSafetyState.distanceAlert:
+        return 'DISTANCE ALERT';
+      case SafeCookSafetyState.gasAlert:
+        return 'GAS ALERT';
+      case SafeCookSafetyState.critical:
+        return 'CRITICAL';
+      case SafeCookSafetyState.sensorUnavailable:
+        return 'STANDBY';
+    }
+  }
+
+  @override
+  void handleSafetyVoiceEvent(SafeCookSafetyEvent event) {
+    if (!mounted) return;
+    if (!_isCookingActive) {
+      final text = event.currentState.voiceMessage;
+      _voiceService.speak(text);
+    }
+  }
   
   void _resetDashboard() {
+    SafeCookSafetyEngine().reset();
     _gasValue = null;
     _distanceValue = null;
     _gasStatus = 'Unknown';
@@ -504,7 +572,6 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
     _gasStatusColor = Colors.white54;
     _distanceStatusColor = Colors.white54;
     _incomingAccumulator = '';
-    _lastSafetyState = 'STANDBY';
     _gasChartData.clear();
     _distChartData.clear();
     // Do NOT clear or reset session variables on Bluetooth reconnect,
@@ -512,26 +579,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   }
 
   String _getCombinedStatus() {
-    if (_gasValue == null || _distanceValue == null) {
-      return 'STANDBY';
-    }
-
-    final isGasCritical = _gasStatus == 'Critical';
-    final isGasWarning = _gasStatus == 'Warning';
-    final isDistVeryClose = _distanceStatus == 'Very Close';
-    final isDistClose = _distanceStatus == 'Close';
-
-    if (isGasCritical && isDistVeryClose) {
-      return 'CRITICAL';
-    } else if (isGasCritical) {
-      return 'GAS ALERT';
-    } else if (isDistVeryClose) {
-      return 'DISTANCE ALERT';
-    } else if (isGasWarning || isDistClose) {
-      return 'CAUTION';
-    } else {
-      return 'SAFE';
-    }
+    return _mapStateToString(SafeCookSafetyEngine().currentState);
   }
 
   Color _getCombinedStatusColor() {
@@ -600,36 +648,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
     }
   }
 
-  void _checkSafetyTransitions(String newState) {
-    if (newState != _lastSafetyState) {
-      _log("Safety state changed from $_lastSafetyState to $newState");
-      
-      final newEvent = SafetyEvent(
-        timestamp: DateTime.now(),
-        state: newState,
-        gasValue: _gasValue,
-        distanceValue: _distanceValue,
-      );
-      setState(() {
-        _safetyHistory.insert(0, newEvent);
-        if (_safetyHistory.length > 50) {
-          _safetyHistory.removeLast();
-        }
-        if (_isCookingActive) {
-          _sessionSafetyHistory.add(newEvent);
-          if (newState == 'CAUTION') _sessionCautionCount++;
-          if (newState == 'GAS ALERT') _sessionGasAlertCount++;
-          if (newState == 'DISTANCE ALERT') _sessionDistanceAlertCount++;
-          if (newState == 'CRITICAL') _sessionCriticalCount++;
-        }
-      });
 
-      if (newState == 'CAUTION' || newState == 'GAS ALERT' || newState == 'DISTANCE ALERT' || newState == 'CRITICAL') {
-        _triggerVibrationAndSound(newState);
-      }
-      _lastSafetyState = newState;
-    }
-  }
 
   Future<void> _triggerVibrationAndSound(String state) async {
     try {
@@ -1352,6 +1371,11 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
         _sensorFreshnessTimer?.cancel();
         _sensorFreshnessTimer = Timer(const Duration(seconds: 5), () {
           if (mounted) {
+            SafeCookSafetyEngine().updateSensorData(
+              gasPercentage: null,
+              chefDistanceCm: null,
+              isBluetoothConnected: _connectedDevice != null,
+            );
             setState(() {
               _gasValue = null;
               _distanceValue = null;
@@ -1365,19 +1389,33 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
         final gasStr = match.group(1);
         final distStr = match.group(2);
         
+        bool hasChanges = false;
+        
         if (gasStr != null) {
           final val = int.tryParse(gasStr);
           if (val != null) {
-            _gasValue = val;
+            if (_gasValue != val) {
+              _gasValue = val;
+              hasChanges = true;
+            }
             if (val < kGasNormalMax) {
-              _gasStatus = 'Normal';
-              _gasStatusColor = _greenAccent;
+              if (_gasStatus != 'Normal') {
+                _gasStatus = 'Normal';
+                _gasStatusColor = _greenAccent;
+                hasChanges = true;
+              }
             } else if (val < kGasWarningMax) {
-              _gasStatus = 'Warning';
-              _gasStatusColor = _amberAccent;
+              if (_gasStatus != 'Warning') {
+                _gasStatus = 'Warning';
+                _gasStatusColor = _amberAccent;
+                hasChanges = true;
+              }
             } else {
-              _gasStatus = 'Critical';
-              _gasStatusColor = _redAccent;
+              if (_gasStatus != 'Critical') {
+                _gasStatus = 'Critical';
+                _gasStatusColor = _redAccent;
+                hasChanges = true;
+              }
             }
             _addGasChartData(val.toDouble());
             if (_isCookingActive) {
@@ -1390,22 +1428,38 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
         
         if (distStr != null) {
           if (distStr == 'NO_ECHO') {
-            _distanceValue = 'No Echo';
-            _distanceStatus = 'No Echo';
-            _distanceStatusColor = Colors.white54;
+            if (_distanceValue != 'No Echo') {
+              _distanceValue = 'No Echo';
+              _distanceStatus = 'No Echo';
+              _distanceStatusColor = Colors.white54;
+              hasChanges = true;
+            }
           } else {
             final val = double.tryParse(distStr);
             if (val != null) {
-              _distanceValue = '${val.toStringAsFixed(2)} cm';
+              final formattedVal = '${val.toStringAsFixed(2)} cm';
+              if (_distanceValue != formattedVal) {
+                _distanceValue = formattedVal;
+                hasChanges = true;
+              }
               if (val > kDistanceSafeMin) {
-                _distanceStatus = 'Safe';
-                _distanceStatusColor = _greenAccent;
+                if (_distanceStatus != 'Safe') {
+                  _distanceStatus = 'Safe';
+                  _distanceStatusColor = _greenAccent;
+                  hasChanges = true;
+                }
               } else if (val >= kDistanceWarningMin) {
-                _distanceStatus = 'Close';
-                _distanceStatusColor = _amberAccent;
+                if (_distanceStatus != 'Close') {
+                  _distanceStatus = 'Close';
+                  _distanceStatusColor = _amberAccent;
+                  hasChanges = true;
+                }
               } else {
-                _distanceStatus = 'Very Close';
-                _distanceStatusColor = _redAccent;
+                if (_distanceStatus != 'Very Close') {
+                  _distanceStatus = 'Very Close';
+                  _distanceStatusColor = _redAccent;
+                  hasChanges = true;
+                }
               }
               _addDistChartData(val);
               if (_isCookingActive) {
@@ -1416,8 +1470,23 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
             }
           }
         }
-        setState(() {});
-        _checkSafetyTransitions(_getCombinedStatus());
+        
+        final double? gasPercent = _gasValue != null ? GasCalibration.toPercent(_gasValue!) : null;
+        final double? distanceCm = (distStr != null && distStr != 'NO_ECHO') ? double.tryParse(distStr) : null;
+        
+        final prevEngineState = SafeCookSafetyEngine().currentState;
+        SafeCookSafetyEngine().updateSensorData(
+          gasPercentage: gasPercent,
+          chefDistanceCm: distanceCm,
+          isBluetoothConnected: _connectedDevice != null,
+        );
+        if (SafeCookSafetyEngine().currentState != prevEngineState) {
+          hasChanges = true;
+        }
+        
+        if (hasChanges && mounted) {
+          setState(() {});
+        }
         _notifySensorListeners();
       }
     } catch (e) {
@@ -1468,6 +1537,9 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   void _handleDisconnect() {
     if (mounted) {
       _sensorFreshnessTimer?.cancel();
+      // Reset Safety Engine on disconnect
+      SafeCookSafetyEngine().reset();
+      
       // Phase 0 fix: if a cooking session is active when BT disconnects,
       // end it so the agent state stays consistent.
       if (_isCookingActive) {
@@ -1525,6 +1597,8 @@ class BluetoothTestPageState extends State<BluetoothTestPage> {
   
   @override
   void dispose() {
+    SafetyVoiceController().unregisterHomeScreen(this);
+    _safetySubscription?.cancel();
     _sensorFreshnessTimer?.cancel();
     _eventChannelSub?.cancel();
     _scrollController.dispose();

@@ -250,10 +250,15 @@ class SafeCookNLU {
     // ------------------------------------------------------------------
     // PRIORITY 6: Sensor queries
     // ------------------------------------------------------------------
+    // Gas queries — covers leak/danger/level phrasing
     if (_matchesAny(q, [
       'gas level', 'how much gas', 'what is the gas', 'check gas',
       'gas reading', 'flame level', 'burner level', 'gas percentage',
       'how high is the gas', 'gas sensor', 'what is the flame',
+      'gas leak', 'is there a gas', 'is there gas', 'could there be gas',
+      'smell gas', 'gas problem', 'gas danger', 'dangerous gas',
+      'is the gas okay', 'is the gas', 'gas okay', 'gas level high', 'gas level low',
+      'any gas', 'gas alert', 'is gas safe', 'gas safe',
     ])) {
       return SafeCookIntent(type: SafeCookIntentType.checkGas, rawQuery: rawInput);
     }
@@ -262,14 +267,24 @@ class SafeCookNLU {
         q.contains('how far') || q.contains('proximity') ||
         q.contains('am i too close') || q.contains('how close') ||
         q.contains('check distance') || q.contains('my distance') ||
-        q.contains('stove distance') || q.contains('vessel distance')) {
+        q.contains('stove distance') || q.contains('vessel distance') ||
+        q.contains('should i step back') || q.contains('step back') ||
+        (q.contains('close') && q.contains('vessel')) ||
+        (q.contains('close') && q.contains('stove'))) {
       return SafeCookIntent(type: SafeCookIntentType.checkDistance, rawQuery: rawInput);
     }
 
+    // Safety status — covers "stove dangerous", "am I in danger" etc.
     if (_matchesAny(q, [
       'is it safe', 'am i safe', 'safety status', 'check safety',
       'how is the safety', 'stove safe', 'is everything okay',
       'is it okay', 'any alerts', 'any warnings', 'how safe is it',
+      'stove dangerous', 'stove is dangerous', 'is the stove dangerous',
+      'is the stove safe', 'is the stove okay', 'stove okay',
+      'is this dangerous', 'is this safe', 'am i in danger',
+      'is it dangerous', 'should i be worried', 'is cooking safe',
+      'is it safe to cook', 'are conditions safe', 'safe to cook',
+      'stove not safe', 'not safe', 'danger alert', 'is there danger',
     ])) {
       return SafeCookIntent(type: SafeCookIntentType.checkSafety, rawQuery: rawInput);
     }
@@ -341,11 +356,23 @@ class SafeCookNLU {
     // PRIORITY 10: General cooking questions (handled by knowledge base)
     // ------------------------------------------------------------------
     if (q.contains('substitute') || q.contains('instead of') ||
-        q.contains('replacement for') || q.contains('how do i') ||
+        q.contains('replacement for') || q.contains('what can i replace') ||
+        (q.contains('replace') && q.contains('with')) ||
+        q.contains('how do i') ||
         q.contains('how to boil') || q.contains('how long should i boil') ||
         q.contains('how to chop') || q.contains('how to fry') ||
         q.contains('cooking tip') || q.contains('can i use') ||
-        q.contains('what happens if i') || q.contains('is it okay to')) {
+        q.contains('what happens if i') || q.contains('is it okay to') ||
+        // Method comparison queries
+        (q.contains('difference between') && (q.contains('boil') || q.contains('steam') || q.contains('fry') || q.contains('bake') || q.contains('grill'))) ||
+        (q.contains('vs') && (q.contains('boil') || q.contains('steam') || q.contains('fry') || q.contains('bake'))) ||
+        (q.contains('versus') && (q.contains('boil') || q.contains('steam') || q.contains('fry'))) ||
+        (q.contains('healthier') && (q.contains('boil') || q.contains('steam') || q.contains('fry'))) ||
+        (q.contains('different') && (q.contains('boil') || q.contains('steam') || q.contains('cook'))) ||
+        (q.contains('when should i') && (q.contains('boil') || q.contains('steam') || q.contains('fry') || q.contains('bake'))) ||
+        q.contains('cooking method') || q.contains('how is') && q.contains('cooked') ||
+        q.contains('what temperature') || q.contains('at what temperature') ||
+        q.contains('how long to cook') || q.contains('how long does it take to cook')) {
       return SafeCookIntent(
         type: SafeCookIntentType.cookingQuestion,
         rawQuery: rawInput,
@@ -387,7 +414,10 @@ class SafeCookNLU {
         q.contains('recipe') || q.contains('something with') ||
         q.contains('what can i make') || q.contains('what can i cook') ||
         q.contains('suggest') || q.contains('recommend') ||
-        q.contains('give me') || q.contains('show me recipes');
+        q.contains('give me') || q.contains('show me') ||
+        q.contains('what can i') || q.contains('something to cook') ||
+        q.contains('what to cook') || q.contains('what should i cook') ||
+        q.contains('what to make');
 
     if (isRecipeSearchPhrase) {
       final entities = _extractRecipeSearchEntities(q);
@@ -441,6 +471,20 @@ class SafeCookNLU {
     bool quick = q.contains('quick') || q.contains('fast') || q.contains('easy') ||
                  q.contains('under 30') || q.contains('under 20') || q.contains('under 15');
 
+    // Extract requested count: "two recipes", "3 recipes", etc.
+    int count = 0;
+    final countWords = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+                        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10};
+    final numMatch = RegExp(r'\b(\d+)\b').firstMatch(q);
+    if (numMatch != null) {
+      count = int.tryParse(numMatch.group(1) ?? '') ?? 0;
+    }
+    if (count == 0) {
+      for (final entry in countWords.entries) {
+        if (q.contains(entry.key)) { count = entry.value; break; }
+      }
+    }
+
     String ingredient = '';
     const ingredients = [
       'potato', 'onion', 'paneer', 'egg', 'rice', 'noodle', 'chicken',
@@ -471,6 +515,7 @@ class SafeCookNLU {
       'quick': quick,
       'ingredient': ingredient,
       'category': category,
+      'count': count,          // 0 = no count specified
       'rawText': q,
     };
   }
