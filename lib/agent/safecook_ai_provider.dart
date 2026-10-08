@@ -7,6 +7,7 @@ import 'safecook_intent.dart';
 import 'safecook_conversation_memory.dart';
 import 'safecook_agent.dart';
 import '../data/recipes.dart';
+import '../models/recipe.dart';
 
 abstract class AIProvider {
   Future<AIResponse> generateResponse({
@@ -14,6 +15,8 @@ abstract class AIProvider {
     required SafeCookContext context,
     required SafeCookConversationMemory memory,
   });
+
+  Future<Recipe?> structureRecipe(String searchResult, String recipeName);
 }
 
 class AIResponse {
@@ -254,6 +257,41 @@ class LocalMockAIProvider implements AIProvider {
       confidence: 0.5,
     );
   }
+
+  @override
+  Future<Recipe?> structureRecipe(String searchResult, String recipeName) async {
+    final normalizedName = recipeName.toLowerCase().trim();
+    if (normalizedName.contains('fail') || searchResult.toLowerCase().contains('error') || searchResult.toLowerCase().contains('failure')) {
+      return null;
+    }
+    final cleanName = recipeName
+        .replaceAll(RegExp(r'recipe|easy|quick|style|cooked|smart', caseSensitive: false), '')
+        .trim();
+    final id = 'dynamic_${cleanName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}';
+    return Recipe(
+      id: id,
+      name: cleanName.split(' ').map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '').join(' ').trim(),
+      category: 'Dynamic',
+      description: 'A delicious custom recipe for $recipeName.',
+      cookingTime: 20,
+      difficulty: 'Easy',
+      servings: 2,
+      ingredients: ['Ingredient 1', 'Ingredient 2', 'Water'],
+      steps: [
+        RecipeStep(
+          stepNumber: 1,
+          instruction: 'Prepare all ingredients for cooking.',
+          voiceInstruction: 'Prepare all ingredients for cooking.',
+        ),
+        RecipeStep(
+          stepNumber: 2,
+          instruction: 'Cook the recipe and serve hot.',
+          voiceInstruction: 'Cook the recipe and serve hot.',
+        ),
+      ],
+      safetyNotes: ['Monitor the stove temperature.', 'Keep children away from hot surfaces.'],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -486,4 +524,103 @@ class GeminiAIProvider implements AIProvider {
     intent: SafeCookIntentType.unknown,
     confidence: 0.0,
   );
+
+  @override
+  Future<Recipe?> structureRecipe(String searchResult, String recipeName) async {
+    if (!isConfigured) {
+      return LocalMockAIProvider().structureRecipe(searchResult, recipeName);
+    }
+    
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: _timeoutSeconds);
+
+      final uri = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent',
+      );
+      
+      final systemInstruction =
+          'You are a professional recipe parser. Convert the provided unstructured text results '
+          'for the recipe "$recipeName" into a structured JSON representation.\n\n'
+          'RESPOND IN STRICT JSON matching this schema:\n'
+          '{\n'
+          '  "id": "dynamic_recipe_unique_id",\n'
+          '  "name": "Recipe Name",\n'
+          '  "category": "Dinner",\n'
+          '  "description": "Short description of the dish",\n'
+          '  "cookingTime": 25,\n'
+          '  "difficulty": "Easy",\n'
+          '  "servings": 4,\n'
+          '  "ingredients": ["1 cup water", "2 onions"],\n'
+          '  "steps": [\n'
+          '    {\n'
+          '      "stepNumber": 1,\n'
+          '      "instruction": "Detailed instruction.",\n'
+          '      "voiceInstruction": "Clear step instruction suitable for text-to-speech reading.",\n'
+          '      "durationMs": 300000,\n'
+          '      "safetyTip": "Optional safety caution tip."\n'
+          '    }\n'
+          '  ],\n'
+          '  "safetyNotes": ["Watch out for hot steam when opening lid."]\n'
+          '}\n'
+          'The ID must start with "dynamic_" and be lower case with underscores.\n'
+          'Keep instructions and voiceInstructions simple, conversational, and direct.';
+
+      final requestBody = {
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': 'Recipe requested: $recipeName\n\nUnstructured Search Results:\n$searchResult'},
+            ],
+          },
+        ],
+        'systemInstruction': {
+          'parts': [
+            {'text': systemInstruction},
+          ],
+        },
+        'generationConfig': {
+          'responseMimeType': 'application/json',
+          'maxOutputTokens': 1000,
+        },
+      };
+
+      final request = await client
+          .postUrl(uri)
+          .timeout(const Duration(seconds: _timeoutSeconds));
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('x-goog-api-key', _resolvedKey);
+      request.write(jsonEncode(requestBody));
+
+      final response = await request.close().timeout(
+        const Duration(seconds: _timeoutSeconds),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint('[SafeCook AI] StructureRecipe HTTP status=${response.statusCode}');
+        client.close();
+        return null;
+      }
+
+      final responseBody = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: _timeoutSeconds));
+      client.close();
+
+      final parsed = jsonDecode(responseBody);
+      final text =
+          parsed['candidates']?[0]?['content']?[ 'parts']?[0]?['text']
+              as String?;
+
+      if (text != null && text.trim().isNotEmpty) {
+        final jsonMap = jsonDecode(text.trim()) as Map<String, dynamic>;
+        return Recipe.fromJson(jsonMap);
+      }
+    } catch (e) {
+      debugPrint('[SafeCook AI Parsing Error] Failed to structure recipe from Gemini response: $e');
+    }
+    return null;
+  }
 }

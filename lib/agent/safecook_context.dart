@@ -5,10 +5,10 @@ import '../models/recipe.dart';
 // on EVERY call so the agent always reads fresh sensor data.
 // ---------------------------------------------------------------------------
 class SafeCookContext {
-  final int? gasValue;        // raw ADC value from sensor
-  final double? gasPercent;   // calibrated 0-100%
+  final int? gasValue; // raw ADC value from sensor
+  final double? gasPercent; // calibrated 0-100%
   final String? distanceValue; // formatted string e.g. "28.5 cm"
-  final double? distanceCm;    // parsed double for arithmetic
+  final double? distanceCm; // parsed double for arithmetic
   final String safetyState;
   final Duration sessionDuration;
   final bool isBluetoothConnected;
@@ -28,12 +28,12 @@ class SafeCookContext {
 // ConversationState — explicit enum for the state machine.
 // ---------------------------------------------------------------------------
 enum ConversationState {
-  idle,             // Wake-word waiting
-  selectingRecipe,  // Agent listed recipes, awaiting user selection
-  confirmingStart,  // Agent asked "start cooking?", awaiting yes/no
+  idle, // Wake-word waiting
+  selectingRecipe, // Agent listed recipes, awaiting user selection
+  confirmingStart, // Agent asked "start cooking?", awaiting yes/no
   awaitingReadyConfirm, // Agent read ingredients+safety, asking "ready for step 1?"
-  cooking,          // Active cooking session — NO wake word needed
-  confirmingEnd,    // Agent asked "end cooking?", awaiting yes/no
+  cooking, // Active cooking session — NO wake word needed
+  confirmingEnd, // Agent asked "end cooking?", awaiting yes/no
 }
 
 extension ConversationStateExtension on ConversationState {
@@ -56,9 +56,10 @@ extension ConversationStateExtension on ConversationState {
 
   bool get requiresWakeWord => this == ConversationState.idle;
   bool get isCooking => this == ConversationState.cooking;
-  bool get isActive =>
-      this != ConversationState.idle;
+  bool get isActive => this != ConversationState.idle;
 }
+
+enum RecipeAcquisitionState { none, discovered, structured, available }
 
 // ---------------------------------------------------------------------------
 // SafeCookSessionMemory — single authoritative mutable session state.
@@ -67,6 +68,7 @@ extension ConversationStateExtension on ConversationState {
 class SafeCookSessionMemory {
   // Conversation FSM
   ConversationState conversationState = ConversationState.idle;
+  RecipeAcquisitionState acquisitionState = RecipeAcquisitionState.none;
 
   // Recipe tracking
   Recipe? selectedRecipe;
@@ -100,6 +102,7 @@ class SafeCookSessionMemory {
 
   void reset() {
     conversationState = ConversationState.idle;
+    acquisitionState = RecipeAcquisitionState.none;
     selectedRecipe = null;
     lastRecipeSearchResults.clear();
     currentStepIndex = 0;
@@ -127,6 +130,15 @@ class SafeCookSessionMemory {
     // Keep selectedRecipe so cooking report can still reference it.
   }
 
+  void confirmStepIndex(int index) {
+    final recipe = selectedRecipe;
+    if (recipe == null || recipe.steps.isEmpty) {
+      currentStepIndex = 0;
+      return;
+    }
+    currentStepIndex = index.clamp(0, recipe.steps.length - 1);
+  }
+
   void nextStep() {
     final r = selectedRecipe;
     if (r != null && currentStepIndex < r.steps.length - 1) {
@@ -147,7 +159,7 @@ class SafeCookSessionMemory {
   void goToStep(int stepNumber) {
     final r = selectedRecipe;
     if (r != null) {
-      currentStepIndex = (stepNumber - 1).clamp(0, r.steps.length - 1);
+      confirmStepIndex(stepNumber - 1);
     }
   }
 }

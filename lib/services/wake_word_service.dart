@@ -7,12 +7,15 @@ class WakeWordService {
 
   final SpeechService _speechService = SpeechService();
   bool _isListening = false;
+  bool _restartScheduled = false;
   bool get isListening => _isListening;
   VoidCallback? _onWakeDetected;
 
   WakeWordService._internal();
 
-  Future<void> startWakeWordDetection({required VoidCallback onWakeDetected}) async {
+  Future<void> startWakeWordDetection({
+    required VoidCallback onWakeDetected,
+  }) async {
     if (_isListening) return;
     _isListening = true;
     _onWakeDetected = onWakeDetected;
@@ -21,6 +24,7 @@ class WakeWordService {
 
   Future<void> stopWakeWordDetection() async {
     _isListening = false;
+    _restartScheduled = false;
     await _speechService.stopListening();
   }
 
@@ -30,9 +34,9 @@ class WakeWordService {
     await _speechService.startListening(
       onResult: (text) {
         final lower = text.toLowerCase();
-        if (lower.contains('hello safecook') || 
-            lower.contains('hey safecook') || 
-            lower.contains('hello safe cook') || 
+        if (lower.contains('hello safecook') ||
+            lower.contains('hey safecook') ||
+            lower.contains('hello safe cook') ||
             lower.contains('hey safe cook') ||
             lower.contains('safecook') ||
             lower.contains('safe cook')) {
@@ -40,16 +44,21 @@ class WakeWordService {
         }
       },
       onError: (err) {
-        if (_isListening) {
-          Future.delayed(const Duration(milliseconds: 1000), _runWakeWordLoop);
-        }
+        _scheduleRestart(const Duration(milliseconds: 1000));
       },
       onDoneListening: () {
-        if (_isListening) {
-          Future.delayed(const Duration(milliseconds: 500), _runWakeWordLoop);
-        }
+        _scheduleRestart(const Duration(milliseconds: 500));
       },
     );
+  }
+
+  void _scheduleRestart(Duration delay) {
+    if (!_isListening || _restartScheduled) return;
+    _restartScheduled = true;
+    Future<void>.delayed(delay, () {
+      _restartScheduled = false;
+      if (_isListening) _runWakeWordLoop();
+    });
   }
 
   void _triggerWakeDetection() async {

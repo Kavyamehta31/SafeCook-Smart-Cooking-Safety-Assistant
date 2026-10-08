@@ -12,6 +12,24 @@ class RecipeStep {
     this.duration,
     this.safetyTip,
   });
+
+  Map<String, dynamic> toJson() => {
+        'stepNumber': stepNumber,
+        'instruction': instruction,
+        'voiceInstruction': voiceInstruction,
+        'durationMs': duration?.inMilliseconds,
+        'safetyTip': safetyTip,
+      };
+
+  factory RecipeStep.fromJson(Map<String, dynamic> json) => RecipeStep(
+        stepNumber: json['stepNumber'] as int,
+        instruction: json['instruction'] as String,
+        voiceInstruction: json['voiceInstruction'] as String,
+        duration: json['durationMs'] != null
+            ? Duration(milliseconds: json['durationMs'] as int)
+            : null,
+        safetyTip: json['safetyTip'] as String?,
+      );
 }
 
 class Recipe {
@@ -38,4 +56,32 @@ class Recipe {
     required this.steps,
     required this.safetyNotes,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'category': category,
+        'description': description,
+        'cookingTime': cookingTime,
+        'difficulty': difficulty,
+        'servings': servings,
+        'ingredients': ingredients,
+        'steps': steps.map((s) => s.toJson()).toList(),
+        'safetyNotes': safetyNotes,
+      };
+
+  factory Recipe.fromJson(Map<String, dynamic> json) => Recipe(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        category: json['category'] as String,
+        description: json['description'] as String,
+        cookingTime: json['cookingTime'] as int,
+        difficulty: json['difficulty'] as String,
+        servings: json['servings'] as int,
+        ingredients: List<String>.from(json['ingredients'] as List),
+        steps: (json['steps'] as List)
+            .map((s) => RecipeStep.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        safetyNotes: List<String>.from(json['safetyNotes'] as List),
+      );
 }

@@ -7,6 +7,7 @@ import 'package:safecook_bluetooth_test/agent/safecook_ai_provider.dart';
 import 'package:safecook_bluetooth_test/agent/safecook_conversation_memory.dart';
 import 'package:safecook_bluetooth_test/services/voice_assistant_service.dart';
 import 'package:safecook_bluetooth_test/models/recipe.dart';
+import 'package:safecook_bluetooth_test/models/cooking_history_entry.dart';
 import 'package:safecook_bluetooth_test/data/recipes.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_engine.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_state.dart';
@@ -20,6 +21,7 @@ import 'package:flutter/material.dart';
 import 'package:safecook_bluetooth_test/main.dart';
 import 'package:safecook_bluetooth_test/screens/cooking_guidance_screen.dart';
 import 'package:safecook_bluetooth_test/safety/safecook_safety_policy.dart';
+import 'package:safecook_bluetooth_test/services/speech_service.dart';
 
 class _RecordingAIProvider implements AIProvider {
   _RecordingAIProvider({AIResponse? response})
@@ -43,11 +45,49 @@ class _RecordingAIProvider implements AIProvider {
     callCount++;
     return response;
   }
+
+  @override
+  Future<Recipe?> structureRecipe(
+    String searchPayload,
+    String cleanRecipeName,
+  ) async {
+    return null;
+  }
 }
 
 void main() {
   setUp(() {
     SafeCookAgent().reset();
+  });
+
+  group('Voice conversation mode', () {
+    test('idle requires wake word before listening', () {
+      final mode = VoiceConversationMode();
+
+      expect(mode.isActive, isFalse);
+      expect(mode.shouldListenAfterTts(), isFalse);
+    });
+
+    test('wake activation allows consecutive turns after TTS', () {
+      final mode = VoiceConversationMode();
+
+      mode.activate();
+
+      expect(mode.isActive, isTrue);
+      expect(mode.shouldListenAfterTts(), isTrue);
+      expect(mode.shouldListenAfterTts(), isTrue);
+    });
+
+    test('inactivity timeout and exit return to wake-word mode', () {
+      final mode = VoiceConversationMode();
+      mode.activate();
+
+      expect(mode.shouldListenAfterTts(inactivityTimedOut: true), isFalse);
+
+      mode.deactivate();
+      expect(mode.isActive, isFalse);
+      expect(mode.shouldListenAfterTts(), isFalse);
+    });
   });
 
   group('Recipe Matching & Disambiguation', () {
@@ -668,6 +708,30 @@ void main() {
       expect(agent.isCookingActive, isFalse);
       expect(reply2, contains('report'));
     });
+
+    test('Supplied recipe owns the active session state', () {
+      final agent = SafeCookAgent();
+      final suppliedRecipe = kPredefinedRecipes.last;
+
+      agent.startCookingSession(suppliedRecipe);
+
+      expect(agent.selectedRecipe, same(suppliedRecipe));
+      expect(agent.isCookingActive, isTrue);
+      expect(agent.conversationState, equals(ConversationState.cooking));
+      expect(agent.memory.currentStepIndex, equals(0));
+    });
+
+    test('Explicit session end clears active state and returns idle', () {
+      final agent = SafeCookAgent();
+      agent.startCookingSession(kPredefinedRecipes.first);
+      agent.memory.currentStepIndex = 2;
+
+      agent.endCookingSession();
+
+      expect(agent.isCookingActive, isFalse);
+      expect(agent.conversationState, equals(ConversationState.idle));
+      expect(agent.memory.currentStepIndex, equals(0));
+    });
   });
 
   group('Bluetooth & Sensor Logic', () {
@@ -1165,10 +1229,7 @@ void main() {
     });
 
     test('14. "go back" => PREVIOUS_STEP', () async {
-      final intent = SafeCookNLU.parse(
-        "go back",
-        conversationState: 'cooking',
-      );
+      final intent = SafeCookNLU.parse("go back", conversationState: 'cooking');
       expect(intent.type, equals(SafeCookIntentType.previousStep));
     });
 
@@ -1221,12 +1282,33 @@ void main() {
       expect(intent.type, equals(SafeCookIntentType.endCooking));
     });
 
+    test('20a. bare "I\'m done" => END_COOKING while cooking', () {
+      final intent = SafeCookNLU.parse(
+        "I'm done",
+        conversationState: 'cooking',
+      );
+      expect(intent.type, equals(SafeCookIntentType.endCooking));
+    });
+
+    test('20b. bare "I\'m done" is not navigation while idle', () {
+      final intent = SafeCookNLU.parse("I'm done");
+      expect(intent.type, equals(SafeCookIntentType.unknown));
+    });
+
     test('21. "that\'s all" => END_COOKING', () async {
       final intent = SafeCookNLU.parse(
         "that's all",
         conversationState: 'cooking',
       );
       expect(intent.type, equals(SafeCookIntentType.endCooking));
+    });
+
+    test('21a. "let\'s start" confirms readiness', () {
+      final intent = SafeCookNLU.parse(
+        "let's start",
+        conversationState: 'awaiting_ready',
+      );
+      expect(intent.type, equals(SafeCookIntentType.confirmYes));
     });
 
     test('22. "connect to HC05" => CONNECT_BLUETOOTH', () async {
@@ -2403,6 +2485,11 @@ void main() {
         await prefs.setVegetarian(true);
         expect(prefs.isVegetarian(), isTrue);
 
+        await prefs.setPreferredCuisine('Indian');
+        await prefs.setPreferredServings(6);
+        expect(prefs.getPreferredCuisine(), equals('Indian'));
+        expect(prefs.getPreferredServings(), equals(6));
+
         SharedPreferences.setMockInitialValues({'safecook_vegetarian': false});
         await PreferenceService().resetForTesting();
         expect(PreferenceService().isVegetarian(), isFalse);
@@ -2427,113 +2514,98 @@ void main() {
         expect(prefs.getCookCount('imc_2'), 1);
       });
 
-      testWidgets('P6. Exactly-once cook count updates and rebuild guard', (WidgetTester tester) async {
-        BluetoothTestPage.isTesting = true;
-        SharedPreferences.setMockInitialValues({});
-        await PreferenceService().resetForTesting();
-        final recipe = kPredefinedRecipes.first;
+      testWidgets(
+        'P6. Exactly-once cook count updates on final step completion',
+        (WidgetTester tester) async {
+          BluetoothTestPage.isTesting = true;
+          SharedPreferences.setMockInitialValues({});
+          await PreferenceService().resetForTesting();
+          final recipe = kPredefinedRecipes.first;
 
-        await tester.pumpWidget(const SafeCookBluetoothTestApp());
-        await tester.pumpAndSettle();
-        final homeState = tester.state<BluetoothTestPageState>(find.byType(BluetoothTestPage));
-        final context = tester.element(find.byType(BluetoothTestPage));
+          await tester.pumpWidget(const SafeCookBluetoothTestApp());
+          await tester.pumpAndSettle();
+          final homeState = tester.state<BluetoothTestPageState>(
+            find.byType(BluetoothTestPage),
+          );
+          final context = tester.element(find.byType(BluetoothTestPage));
 
-        // 1. First push: fresh session. should increment from 0 to 1
-        SafeCookAgent().reset();
-        expect(PreferenceService().getCookCount(recipe.id), 0);
+          // 1. Push screen: cook count should remain 0
+          SafeCookAgent().reset();
+          expect(PreferenceService().getCookCount(recipe.id), 0);
 
-        // Production simulation: isCookingActive is set to true BEFORE pushing screen
-        SafeCookAgent().memory.isCookingActive = true;
+          SafeCookAgent().memory.isCookingActive = true;
 
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => CookingGuidanceScreen(
-              recipe: recipe,
-              homeState: homeState,
-              startSilently: true,
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CookingGuidanceScreen(
+                recipe: recipe,
+                homeState: homeState,
+                startSilently: true,
+              ),
             ),
-          ),
-        );
-        await tester.pumpAndSettle();
+          );
+          await tester.pumpAndSettle();
 
-        expect(PreferenceService().getCookCount(recipe.id), 1);
-        expect(PreferenceService().getLastCookedRecipeId(), recipe.id);
+          // Entered but not final step - count remains 0
+          expect(PreferenceService().getCookCount(recipe.id), 0);
 
-        // 2. Rebuild the screen: verify it does NOT increment again
-        final state = tester.state<CookingGuidanceScreenState>(find.byType(CookingGuidanceScreen));
-        // ignore: invalid_use_of_protected_member
-        state.setState(() {});
-        await tester.pump();
-        expect(PreferenceService().getCookCount(recipe.id), 1);
+          // 2. Complete early (pop screen) - count remains 0
+          Navigator.pop(context);
+          await tester.pumpAndSettle();
+          expect(PreferenceService().getCookCount(recipe.id), 0);
 
-        // 3. Re-entering/re-creating the screen for the SAME active session:
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => CookingGuidanceScreen(
-              recipe: recipe,
-              homeState: homeState,
-              startSilently: true,
+          // 3. Start a new session, advance to final step and complete
+          SafeCookAgent().reset();
+          SafeCookAgent().memory.isCookingActive = true;
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CookingGuidanceScreen(
+                recipe: recipe,
+                homeState: homeState,
+                startSilently: true,
+              ),
             ),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(PreferenceService().getCookCount(recipe.id), 1);
+          );
+          await tester.pumpAndSettle();
 
-        Navigator.pop(context);
-        await tester.pumpAndSettle();
+          final screenState = tester.state<CookingGuidanceScreenState>(
+            find.byType(CookingGuidanceScreen),
+          );
+          screenState.currentStepIndex =
+              recipe.steps.length - 1; // set to final step
 
-        // 4. Pop the cooking screen to return to dashboard
-        Navigator.pop(context);
-        await tester.pumpAndSettle();
-        
-        // Trigger setState on homeState since we pushed navigation manually in the test
-        // ignore: invalid_use_of_protected_member
-        homeState.setState(() {});
-        await tester.pumpAndSettle();
-        
-        // When we pop and return to dashboard, isCookingActive is false (ended)
-        expect(SafeCookAgent().memory.isCookingActive, isFalse);
+          await tester.tap(find.text('END COOKING'));
+          await tester.pumpAndSettle();
 
-        // Verify that returning to the dashboard refreshed the Last Cooked display in the widget tree
-        expect(find.text('LAST COOKED RECIPE'), findsOneWidget);
-        expect(find.text(recipe.name), findsOneWidget);
-
-        // 5. Start a NEW session: should increment to 2
-        SafeCookAgent().memory.isCookingActive = true;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => CookingGuidanceScreen(
-              recipe: recipe,
-              homeState: homeState,
-              startSilently: true,
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(PreferenceService().getCookCount(recipe.id), 2);
-
-        Navigator.pop(context);
-        await tester.pumpAndSettle();
-      });
+          expect(PreferenceService().getCookCount(recipe.id), 1);
+          expect(PreferenceService().getLastCookedRecipeId(), recipe.id);
+          expect(PreferenceService().getRecentRecipeIds(), contains(recipe.id));
+          expect(PreferenceService().getCookingHistory(), hasLength(1));
+          expect(
+            find.text('${recipe.steps.length} / ${recipe.steps.length}'),
+            findsOneWidget,
+          );
+        },
+      );
 
       test('P7. Preferences do not affect SafetyEngine behavior', () async {
         SharedPreferences.setMockInitialValues({'safecook_vegetarian': true});
         await PreferenceService().resetForTesting();
         final engine = SafeCookSafetyEngine()..reset();
-        
+
         expect(SafeCookSafetyPolicy.gasCautionThreshold, isNotNull);
         expect(SafeCookSafetyPolicy.gasCriticalThreshold, isNotNull);
-        
+
         engine.updateSensorData(
           gasPercentage: 15.0,
           chefDistanceCm: 50.0,
           isBluetoothConnected: true,
         );
         expect(engine.currentState, equals(SafeCookSafetyState.safe));
-        
+
         engine.updateSensorData(
           gasPercentage: 45.0,
           chefDistanceCm: 50.0,
@@ -2561,7 +2633,10 @@ void main() {
         final query = 'search the web for standard refrigerator temp';
         final intent = SafeCookNLU.parse(query);
         expect(intent.type, equals(SafeCookIntentType.webSearch));
-        expect(intent.entities['webQuery'], equals('standard refrigerator temp'));
+        expect(
+          intent.entities['webQuery'],
+          equals('standard refrigerator temp'),
+        );
       });
 
       test('W2. WebSearchService success flow', () async {
@@ -2572,10 +2647,10 @@ void main() {
               {
                 'title': 'Test title',
                 'url': 'https://test.com',
-                'snippet': 'Test snippet of results.'
-              }
+                'snippet': 'Test snippet of results.',
+              },
             ],
-            'answer': 'Concise test answer.'
+            'answer': 'Concise test answer.',
           };
           request.response
             ..statusCode = HttpStatus.ok
@@ -2610,7 +2685,10 @@ void main() {
 
         final result = await service.search('query');
         expect(result.success, isFalse);
-        expect(result.message, contains('Network unavailable or proxy server offline'));
+        expect(
+          result.message,
+          contains('Network unavailable or proxy server offline'),
+        );
       });
 
       test('W5. Agent web-search tool dispatch', () async {
@@ -2628,10 +2706,15 @@ void main() {
           disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
           bluetoothStatus: buildNoOpTools().bluetoothStatus,
           webSearch: (query) async {
-            return ToolResult.ok('Search OK', data: WebSearchResponse(
-              results: [WebSearchResult(title: 'T1', url: 'U1', snippet: 'S1')],
-              answer: 'Concise Answer'
-            ));
+            return ToolResult.ok(
+              'Search OK',
+              data: WebSearchResponse(
+                results: [
+                  WebSearchResult(title: 'T1', url: 'U1', snippet: 'S1'),
+                ],
+                answer: 'Concise Answer',
+              ),
+            );
           },
         );
 
@@ -2660,20 +2743,27 @@ void main() {
           bluetoothStatus: buildNoOpTools().bluetoothStatus,
           webSearch: (query) async {
             expect(query, equals('current temperature'));
-            return ToolResult.ok('Search OK', data: WebSearchResponse(
-              results: [WebSearchResult(title: 'T2', url: 'U2', snippet: 'S2')],
-              answer: 'Gemini Concise Answer'
-            ));
+            return ToolResult.ok(
+              'Search OK',
+              data: WebSearchResponse(
+                results: [
+                  WebSearchResult(title: 'T2', url: 'U2', snippet: 'S2'),
+                ],
+                answer: 'Gemini Concise Answer',
+              ),
+            );
           },
         );
 
-        agent.aiProvider = _MockRespondingAIProvider(AIResponse(
-          assistantText: 'I will search the web.',
-          intent: SafeCookIntentType.webSearch,
-          toolCall: 'webSearch',
-          toolArguments: {'query': 'current temperature'},
-          confidence: 0.95,
-        ));
+        agent.aiProvider = _MockRespondingAIProvider(
+          AIResponse(
+            assistantText: 'I will search the web.',
+            intent: SafeCookIntentType.webSearch,
+            toolCall: 'webSearch',
+            toolArguments: {'query': 'current temperature'},
+            confidence: 0.95,
+          ),
+        );
 
         final reply = await agent.handleInput(
           'how warm is it today?',
@@ -2720,7 +2810,7 @@ void main() {
 
       test('W8. Safety remains functional during search failure', () async {
         final agent = SafeCookAgent()..reset();
-        
+
         final mockTools = SafeCookTools(
           searchRecipes: buildNoOpTools().searchRecipes,
           startCooking: buildNoOpTools().startCooking,
@@ -2742,7 +2832,10 @@ void main() {
           cookingCtx(),
           mockTools,
         );
-        expect(reply, contains('I was unable to search the web right now. Network error'));
+        expect(
+          reply,
+          contains('I was unable to search the web right now. Network error'),
+        );
 
         final engine = SafeCookSafetyEngine()..reset();
         engine.updateSensorData(
@@ -2753,9 +2846,12 @@ void main() {
         expect(engine.currentState, equals(SafeCookSafetyState.safe));
       });
 
-      test('W9. WebSearchService default URL is production Cloudflare Worker', () {
-        expect(WebSearchService(), isNotNull);
-      });
+      test(
+        'W9. WebSearchService default URL is production Cloudflare Worker',
+        () {
+          expect(WebSearchService(), isNotNull);
+        },
+      );
 
       test('W10. WebSearchService rejects empty queries locally', () async {
         final result = await service.search('   ');
@@ -2776,12 +2872,351 @@ void main() {
         });
 
         final client = HttpClient();
-        final req = await client.openUrl('OPTIONS', Uri.parse('http://localhost:${mockServer.port}/search'));
+        final req = await client.openUrl(
+          'OPTIONS',
+          Uri.parse('http://localhost:${mockServer.port}/search'),
+        );
         final resp = await req.close();
         expect(resp.statusCode, equals(HttpStatus.noContent));
         expect(resp.headers.value('Access-Control-Allow-Origin'), equals('*'));
         client.close();
       });
+    });
+
+    group('Phase 8: Persistent Structured Personalization & Memory Tests', () {
+      setUp(() async {
+        SharedPreferences.setMockInitialValues({});
+        await PreferenceService().resetForTesting();
+      });
+
+      test('M1. Recipe and Step Serialization', () {
+        final stepJson = kPredefinedRecipes.first.steps.first.toJson();
+        expect(stepJson['instruction'], isNotNull);
+        expect(stepJson['durationMs'], isNotNull);
+
+        final step = RecipeStep.fromJson(stepJson);
+        expect(
+          step.instruction,
+          equals(kPredefinedRecipes.first.steps.first.instruction),
+        );
+        expect(
+          step.duration,
+          equals(kPredefinedRecipes.first.steps.first.duration),
+        );
+
+        final recipeJson = kPredefinedRecipes.first.toJson();
+        expect(recipeJson['id'], isNotNull);
+        expect(recipeJson['steps'], isA<List>());
+
+        final recipe = Recipe.fromJson(recipeJson);
+        expect(recipe.id, equals(kPredefinedRecipes.first.id));
+        expect(
+          recipe.steps.first.instruction,
+          equals(kPredefinedRecipes.first.steps.first.instruction),
+        );
+      });
+
+      test(
+        'M2. PreferenceService dynamic recipes, recent recipes, and cooking history persistence',
+        () async {
+          final prefs = PreferenceService();
+          expect(prefs.getDynamicRecipes(), isEmpty);
+
+          final testRecipe = Recipe(
+            id: 'dynamic_test_recipe',
+            name: 'Dynamic Test Recipe',
+            category: 'Breakfast',
+            description: 'A test dynamic recipe',
+            cookingTime: 10,
+            difficulty: 'Easy',
+            servings: 2,
+            ingredients: ['Egg', 'Salt'],
+            steps: [
+              RecipeStep(
+                stepNumber: 1,
+                instruction: 'Crack egg',
+                voiceInstruction: 'Crack egg',
+                duration: const Duration(minutes: 1),
+              ),
+            ],
+            safetyNotes: [],
+          );
+
+          await prefs.saveDynamicRecipe(testRecipe);
+          final dynamicRecipes = prefs.getDynamicRecipes();
+          expect(dynamicRecipes, hasLength(1));
+          expect(dynamicRecipes.first.name, equals('Dynamic Test Recipe'));
+
+          await prefs.deleteDynamicRecipe('dynamic_test_recipe');
+          expect(prefs.getDynamicRecipes(), isEmpty);
+
+          await prefs.saveDynamicRecipe(testRecipe);
+
+          expect(prefs.getRecentRecipeIds(), isEmpty);
+          await prefs.addToRecentRecipes('dynamic_test_recipe');
+          expect(prefs.getRecentRecipeIds(), contains('dynamic_test_recipe'));
+
+          expect(prefs.getCookingHistory(), isEmpty);
+          final entry = CookingHistoryEntry(
+            recipeId: 'dynamic_test_recipe',
+            completedAt: DateTime.now(),
+            duration: const Duration(minutes: 5),
+            stepsCompleted: 1,
+            totalSteps: 1,
+          );
+          await prefs.addCookingHistoryEntry(entry);
+          await prefs.addCookingHistoryEntry(
+            CookingHistoryEntry(
+              recipeId: 'dynamic_test_recipe',
+              completedAt: DateTime.now(),
+              duration: const Duration(minutes: 1),
+              stepsCompleted: 0,
+              totalSteps: 1,
+              completed: false,
+            ),
+          );
+          expect(prefs.getCookingHistory(), hasLength(2));
+          expect(
+            prefs.getCookingHistory().first.recipeId,
+            equals('dynamic_test_recipe'),
+          );
+          expect(prefs.getCompletedSessionCount(), equals(1));
+          expect(prefs.getAbortedSessionCount(), equals(1));
+          expect(prefs.getRecipeFrequency()['dynamic_test_recipe'], equals(1));
+        },
+      );
+
+      test('M3. Unified candidate lookup order (local-first)', () async {
+        final prefs = PreferenceService();
+        final dynamicRecipe = Recipe(
+          id: 'dynamic_butter_chicken',
+          name: 'Dynamic Butter Chicken',
+          category: 'Indian Main Course',
+          description: 'Special recipe',
+          cookingTime: 30,
+          difficulty: 'Medium',
+          servings: 4,
+          ingredients: ['Chicken'],
+          steps: [
+            RecipeStep(
+              stepNumber: 1,
+              instruction: 'Cook chicken',
+              voiceInstruction: 'Cook chicken',
+              duration: const Duration(minutes: 5),
+            ),
+          ],
+          safetyNotes: [],
+        );
+        await prefs.saveDynamicRecipe(dynamicRecipe);
+        await prefs.setFavorite(dynamicRecipe.id, true);
+
+        final agent = SafeCookAgent()..reset();
+
+        // 1. Predefined lookup
+        final replyPredefined = await agent.handleInput(
+          'paneer butter masala',
+          idleCtx(),
+          noOp(),
+        );
+        expect(replyPredefined.toLowerCase(), contains('paneer butter masala'));
+
+        // 2. Local dynamic lookup
+        final replyDynamic = await agent.handleInput(
+          'dynamic butter chicken',
+          idleCtx(),
+          noOp(),
+        );
+        expect(replyDynamic.toLowerCase(), contains('dynamic butter chicken'));
+
+        final recommendation = await agent.handleInput(
+          'what can i cook?',
+          idleCtx(),
+          noOp(),
+        );
+        expect(
+          agent.memory.lastRecipeSearchResults.first.id,
+          equals(dynamicRecipe.id),
+        );
+        expect(
+          recommendation.toLowerCase(),
+          contains('dynamic butter chicken'),
+        );
+      });
+
+      test(
+        'M4. Tokenized Jaccard similarity and container deduplication',
+        () async {
+          final agent = SafeCookAgent()..reset();
+          final r1 = Recipe(
+            id: '1',
+            name: 'Butter Paneer',
+            category: 'Cat',
+            description: 'Desc',
+            cookingTime: 10,
+            difficulty: 'Easy',
+            servings: 2,
+            ingredients: [],
+            steps: [],
+            safetyNotes: [],
+          );
+
+          final r2 = Recipe(
+            id: '2',
+            name: 'Paneer Butter Masala',
+            category: 'Cat',
+            description: 'Desc',
+            cookingTime: 10,
+            difficulty: 'Easy',
+            servings: 2,
+            ingredients: [],
+            steps: [],
+            safetyNotes: [],
+          );
+
+          // Should be duplicate because they share normalized tokens "paneer" and "butter"
+          expect(agent.isDuplicateRecipePublic(r1, r2), isTrue);
+
+          final r3 = Recipe(
+            id: '3',
+            name: 'Chicken curry',
+            category: 'Cat',
+            description: 'Desc',
+            cookingTime: 10,
+            difficulty: 'Easy',
+            servings: 2,
+            ingredients: [],
+            steps: [],
+            safetyNotes: [],
+          );
+          expect(agent.isDuplicateRecipePublic(r1, r3), isFalse);
+        },
+      );
+
+      test('M5. Dynamic recipe lifecycle agent states', () async {
+        final agent = SafeCookAgent()..reset();
+
+        // Web search mock returning a valid recipe structure and search results
+        final mockTools = SafeCookTools(
+          searchRecipes: buildNoOpTools().searchRecipes,
+          startCooking: buildNoOpTools().startCooking,
+          nextStep: buildNoOpTools().nextStep,
+          previousStep: buildNoOpTools().previousStep,
+          repeatStep: buildNoOpTools().repeatStep,
+          goToStep: buildNoOpTools().goToStep,
+          endCooking: buildNoOpTools().endCooking,
+          connectBluetooth: buildNoOpTools().connectBluetooth,
+          disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+          bluetoothStatus: buildNoOpTools().bluetoothStatus,
+          webSearch: (query) async {
+            return ToolResult.ok(
+              'Search OK',
+              data: WebSearchResponse(
+                results: [
+                  WebSearchResult(
+                    title: 'Spaghetti recipe',
+                    url: 'U',
+                    snippet: 'Boil pasta and tomato sauce.',
+                  ),
+                ],
+                answer: 'Boil pasta',
+              ),
+            );
+          },
+        );
+
+        agent.aiProvider = LocalMockAIProvider();
+
+        expect(
+          agent.memory.acquisitionState,
+          equals(RecipeAcquisitionState.none),
+        );
+
+        final reply = await agent.handleInput(
+          'search the web for Spaghetti recipe',
+          idleCtx(),
+          mockTools,
+        );
+        expect(reply.toLowerCase(), contains('spaghetti'));
+        expect(
+          agent.memory.acquisitionState,
+          equals(RecipeAcquisitionState.available),
+        );
+
+        final stored = PreferenceService().getDynamicRecipes();
+        expect(stored, isNotEmpty);
+      });
+
+      test(
+        'M6. Graceful failure during web search / Gemini structuring',
+        () async {
+          final agent = SafeCookAgent()..reset();
+
+          // Let's first test web search failure
+          final failTools = SafeCookTools(
+            searchRecipes: buildNoOpTools().searchRecipes,
+            startCooking: buildNoOpTools().startCooking,
+            nextStep: buildNoOpTools().nextStep,
+            previousStep: buildNoOpTools().previousStep,
+            repeatStep: buildNoOpTools().repeatStep,
+            goToStep: buildNoOpTools().goToStep,
+            endCooking: buildNoOpTools().endCooking,
+            connectBluetooth: buildNoOpTools().connectBluetooth,
+            disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+            bluetoothStatus: buildNoOpTools().bluetoothStatus,
+            webSearch: (query) async {
+              return const ToolResult.fail('Network out');
+            },
+          );
+
+          final reply1 = await agent.handleInput(
+            'search the web for spaghetti recipe',
+            idleCtx(),
+            failTools,
+          );
+          expect(reply1, contains('Network out'));
+          expect(
+            agent.memory.acquisitionState,
+            equals(RecipeAcquisitionState.none),
+          );
+
+          // Now test Gemini structuring failure
+          final okWebSearchTools = SafeCookTools(
+            searchRecipes: buildNoOpTools().searchRecipes,
+            startCooking: buildNoOpTools().startCooking,
+            nextStep: buildNoOpTools().nextStep,
+            previousStep: buildNoOpTools().previousStep,
+            repeatStep: buildNoOpTools().repeatStep,
+            goToStep: buildNoOpTools().goToStep,
+            endCooking: buildNoOpTools().endCooking,
+            connectBluetooth: buildNoOpTools().connectBluetooth,
+            disconnectBluetooth: buildNoOpTools().disconnectBluetooth,
+            bluetoothStatus: buildNoOpTools().bluetoothStatus,
+            webSearch: (query) async {
+              return ToolResult.ok(
+                'Search OK',
+                data: WebSearchResponse(
+                  results: [
+                    WebSearchResult(title: 'bad', url: 'U', snippet: 'bad'),
+                  ],
+                  answer: 'bad',
+                ),
+              );
+            },
+          );
+
+          agent.aiProvider = _FailStructuringAIProvider();
+          final reply2 = await agent.handleInput(
+            'search the web for broccoli soup recipe',
+            idleCtx(),
+            okWebSearchTools,
+          );
+          expect(reply2, contains('unable to structure it'));
+          expect(
+            agent.memory.acquisitionState,
+            equals(RecipeAcquisitionState.none),
+          );
+        },
+      );
     });
   });
 }
@@ -2806,6 +3241,14 @@ class _MockTrackingAIProvider implements AIProvider {
       confidence: 1.0,
     );
   }
+
+  @override
+  Future<Recipe?> structureRecipe(
+    String searchPayload,
+    String cleanRecipeName,
+  ) async {
+    return null;
+  }
 }
 
 class _MockRespondingAIProvider implements AIProvider {
@@ -2820,5 +3263,22 @@ class _MockRespondingAIProvider implements AIProvider {
   }) async {
     return response;
   }
+
+  @override
+  Future<Recipe?> structureRecipe(
+    String searchPayload,
+    String cleanRecipeName,
+  ) async {
+    return null;
+  }
 }
 
+class _FailStructuringAIProvider extends LocalMockAIProvider {
+  @override
+  Future<Recipe?> structureRecipe(
+    String searchPayload,
+    String cleanRecipeName,
+  ) async {
+    return null;
+  }
+}

@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import '../safety/safecook_safety_engine.dart';
 import '../safety/safecook_safety_state.dart';
 import '../safety/safecook_safety_policy.dart';
+import '../services/preference_service.dart';
 
 // ---------------------------------------------------------------------------
 // SafeCookAgent — singleton brain of the voice assistant.
@@ -65,10 +66,18 @@ class SafeCookAgent {
   set selectedRecipe(Recipe? r) => _mem.selectedRecipe = r;
   bool get isCookingActive => _mem.isCookingActive;
 
+  void startCookingSession(Recipe recipe) {
+    _mem.startCookingSession(recipe);
+  }
+
+  void endCookingSession() {
+    _mem.endCookingSession();
+  }
+
   /// Called by CookingGuidanceScreen every time the step index changes
   /// so _mem stays in sync with the UI.
   void confirmStepIndex(int idx) {
-    _mem.currentStepIndex = idx;
+    _mem.confirmStepIndex(idx);
   }
 
   /// Full reset — call when a session ends cleanly.
@@ -82,13 +91,15 @@ class SafeCookAgent {
   // -------------------------------------------------------------------------
   final Map<String, Recipe> _fullNameIndex = {};
   final Map<String, List<Recipe>> _aliasIndex = {};
-  bool _isIndexBuilt = false;
 
   void _buildRecipeIndex() {
-    if (_isIndexBuilt) return;
     _fullNameIndex.clear();
     _aliasIndex.clear();
-    for (final r in kPredefinedRecipes) {
+    final allRecipes = <Recipe>[
+      ...kPredefinedRecipes,
+      ...PreferenceService().getDynamicRecipes(),
+    ];
+    for (final r in allRecipes) {
       final normName = _norm(r.name);
       _fullNameIndex[normName] = r;
       _addAlias(normName, r);
@@ -102,7 +113,6 @@ class SafeCookAgent {
         }
       }
     }
-    _isIndexBuilt = true;
   }
 
   void _addAlias(String alias, Recipe r) =>
@@ -145,6 +155,55 @@ class SafeCookAgent {
       }
     }
     return c;
+  }
+
+  List<Recipe> _personalizeRecommendations(List<Recipe> recipes) {
+    final preferences = PreferenceService();
+    final favoriteIds = preferences.getFavoriteRecipeIds().toSet();
+    final recentIds = preferences.getRecentRecipeIds();
+    final frequency = preferences.getRecipeFrequency();
+    final cuisine = preferences.getPreferredCuisine().toLowerCase();
+    final servings = preferences.getPreferredServings();
+    final vegetarian = preferences.isVegetarian();
+
+    final ranked = List<Recipe>.from(recipes);
+    ranked.sort((a, b) {
+      int score(Recipe recipe) {
+        var value = 0;
+        if (favoriteIds.contains(recipe.id)) value += 1000;
+        value += (frequency[recipe.id] ?? 0) * 100;
+        final recentIndex = recentIds.indexOf(recipe.id);
+        if (recentIndex >= 0) value += 50 - recentIndex.clamp(0, 50);
+        if (cuisine != 'any' &&
+            (recipe.category.toLowerCase().contains(cuisine) ||
+                recipe.name.toLowerCase().contains(cuisine))) {
+          value += 25;
+        }
+        value -= (recipe.servings - servings).abs();
+        if (vegetarian) {
+          const nonVegetarian = [
+            'chicken',
+            'egg',
+            'fish',
+            'mutton',
+            'prawn',
+            'meat',
+            'lamb',
+          ];
+          if (!nonVegetarian.any(
+            (word) =>
+                recipe.name.toLowerCase().contains(word) ||
+                recipe.description.toLowerCase().contains(word),
+          )) {
+            value += 10;
+          }
+        }
+        return value;
+      }
+
+      return score(b).compareTo(score(a));
+    });
+    return ranked;
   }
 
   static String _fmtDuration(Duration d) {
@@ -356,7 +415,7 @@ class SafeCookAgent {
       } else if (intent.type == SafeCookIntentType.selectRecipe) {
         responseText = _handleSelectRecipe(intent);
       } else if (intent.type == SafeCookIntentType.findRecipe) {
-        responseText = _handleFindRecipe(intent, tools);
+        responseText = await _handleFindRecipe(intent, tools);
       } else if (intent.type == SafeCookIntentType.startCooking) {
         responseText = await _handleStartCooking(context, tools);
       } else if (intent.type == SafeCookIntentType.nextStep) {
@@ -521,7 +580,7 @@ class SafeCookAgent {
                 ),
               );
             } else if (tCall == 'findRecipe') {
-              responseText = _handleFindRecipe(
+              responseText = await _handleFindRecipe(
                 SafeCookIntent(
                   type: SafeCookIntentType.findRecipe,
                   rawQuery: rawInput,
@@ -556,7 +615,8 @@ class SafeCookAgent {
             } else if (tCall == 'endCooking') {
               responseText = _handleEndCooking(context);
             } else if (tCall == 'webSearch') {
-              final query = aiResponse.toolArguments['query'] as String? ?? rawInput;
+              final query =
+                  aiResponse.toolArguments['query'] as String? ?? rawInput;
               responseText = await _handleWebSearch(query, tools);
             } else {
               responseText = aiResponse.assistantText;
@@ -697,7 +757,10 @@ class SafeCookAgent {
     return 'I\'m not sure which recipe you mean. Please say the recipe name, or say "first", "second", etc.';
   }
 
-  String _handleFindRecipe(SafeCookIntent intent, SafeCookTools tools) {
+  Future<String> _handleFindRecipe(
+    SafeCookIntent intent,
+    SafeCookTools tools,
+  ) async {
     final requestedCount = intent.entities['count'] as int? ?? 0;
 
     final results = tools.searchRecipes(
@@ -716,12 +779,21 @@ class SafeCookAgent {
         (intent.entities['vegetarian'] as bool? ?? false) ||
         (intent.entities['quick'] as bool? ?? false);
 
-    final effectiveResults = (results.isEmpty && !hasConstraints)
-        ? kPredefinedRecipes
+    var effectiveResults = (results.isEmpty && !hasConstraints)
+        ? <Recipe>[
+            ...kPredefinedRecipes,
+            ...PreferenceService().getDynamicRecipes(),
+          ]
         : results;
 
+    if (!hasConstraints && requestedCount == 0) {
+      effectiveResults = _personalizeRecommendations(effectiveResults);
+    }
+
     if (effectiveResults.isEmpty) {
-      return "I couldn't find matching recipes. Try asking for a specific ingredient, cuisine, or say \"show me all recipes\".";
+      final query = intent.entities['rawText'] as String? ?? intent.rawQuery;
+      final clean = _cleanQuery(_norm(query));
+      return await _handleWebSearch(clean, tools);
     }
 
     _mem.lastRecipeSearchResults = List.from(effectiveResults);
@@ -1142,31 +1214,202 @@ class SafeCookAgent {
         : 'I was unable to disconnect. ${result.message}';
   }
 
-  Future<String> _handleWebSearch(
-    String query,
-    SafeCookTools tools,
-  ) async {
+  Future<String> _handleWebSearch(String query, SafeCookTools tools) async {
     _mem.pendingWebQuery = query;
-    if (tools.webSearch == null) {
-      return 'I was unable to search the web right now. Web search is not wired.';
-    }
-    final result = await tools.webSearch!(query);
-    logTool('webSearch', result);
-    if (result.success) {
+
+    final lowerRaw = (_mem.lastUserRequest ?? '').toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final isRecipeSearch =
+        lowerRaw.contains('recipe') ||
+        lowerRaw.contains('cook') ||
+        lowerRaw.contains('make') ||
+        lowerRaw.contains('how to') ||
+        lowerQuery.contains('recipe') ||
+        lowerQuery.contains('cook') ||
+        lowerQuery.contains('make') ||
+        _mem.conversationState == ConversationState.selectingRecipe;
+
+    if (isRecipeSearch) {
+      _mem.acquisitionState = RecipeAcquisitionState.discovered;
+      if (tools.webSearch == null) {
+        _mem.acquisitionState = RecipeAcquisitionState.none;
+        return 'I was unable to search the web right now. Web search is not wired.';
+      }
+
+      final result = await tools.webSearch!(query);
+      logTool('webSearch', result);
+
+      if (!result.success) {
+        _mem.acquisitionState = RecipeAcquisitionState.none;
+        return 'I was unable to search the web right now. ${result.message}';
+      }
+
       _mem.pendingWebQuery = null;
       final response = result.data as WebSearchResponse;
+      final StringBuffer sb = StringBuffer();
       if (response.answer != null && response.answer!.trim().isNotEmpty) {
-        return response.answer!;
+        sb.writeln(response.answer);
       }
-      if (response.results.isNotEmpty) {
-        final topResult = response.results.first;
-        return '${topResult.snippet} (Source: ${topResult.title})';
+      for (final r in response.results) {
+        sb.writeln('${r.title}: ${r.snippet}');
       }
-      return 'I found no results online for "$query".';
+      final searchPayload = sb.toString().trim();
+
+      if (searchPayload.isEmpty) {
+        _mem.acquisitionState = RecipeAcquisitionState.none;
+        return 'I found no results online for "$query".';
+      }
+
+      _mem.acquisitionState = RecipeAcquisitionState.structured;
+      final cleanRecipeName = _cleanQuery(_norm(query));
+
+      final structuredRecipe = await aiProvider.structureRecipe(
+        searchPayload,
+        cleanRecipeName,
+      );
+      if (structuredRecipe == null) {
+        _mem.acquisitionState = RecipeAcquisitionState.none;
+        return 'I found information online for "$query" but was unable to structure it as a cooking recipe.';
+      }
+
+      // Deduplicate against existing recipes
+      final allRecipes = <Recipe>[
+        ...kPredefinedRecipes,
+        ...PreferenceService().getDynamicRecipes(),
+      ];
+      Recipe? duplicate;
+      for (final existing in allRecipes) {
+        if (_isDuplicateRecipe(structuredRecipe, existing)) {
+          duplicate = existing;
+          break;
+        }
+      }
+
+      if (duplicate != null) {
+        _mem.selectedRecipe = duplicate;
+        _mem.acquisitionState = RecipeAcquisitionState.available;
+        _mem.conversationState = ConversationState.confirmingStart;
+        final resp =
+            'I found the recipe for ${duplicate.name} locally. Would you like to start cooking?';
+        _mem.lastAssistantResponse = resp;
+        return resp;
+      }
+
+      // For a new recipe, generate stable unique ID
+      final stableId =
+          'dynamic_${_norm(structuredRecipe.name).replaceAll(' ', '_')}';
+      final finalRecipe = Recipe(
+        id: stableId,
+        name: structuredRecipe.name,
+        category: structuredRecipe.category,
+        description: structuredRecipe.description,
+        cookingTime: structuredRecipe.cookingTime,
+        difficulty: structuredRecipe.difficulty,
+        servings: structuredRecipe.servings,
+        ingredients: structuredRecipe.ingredients,
+        steps: structuredRecipe.steps,
+        safetyNotes: structuredRecipe.safetyNotes,
+      );
+
+      await PreferenceService().saveDynamicRecipe(finalRecipe);
+      _mem.selectedRecipe = finalRecipe;
+      _mem.acquisitionState = RecipeAcquisitionState.available;
+      _mem.conversationState = ConversationState.confirmingStart;
+      final resp =
+          'I found a recipe for ${finalRecipe.name} online. It takes ${finalRecipe.cookingTime} minutes and serves ${finalRecipe.servings} people. Would you like to start cooking?';
+      _mem.lastAssistantResponse = resp;
+      return resp;
     } else {
-      return 'I was unable to search the web right now. ${result.message}';
+      if (tools.webSearch == null) {
+        return 'I was unable to search the web right now. Web search is not wired.';
+      }
+      final result = await tools.webSearch!(query);
+      logTool('webSearch', result);
+      if (result.success) {
+        _mem.pendingWebQuery = null;
+        final response = result.data as WebSearchResponse;
+        if (response.answer != null && response.answer!.trim().isNotEmpty) {
+          return response.answer!;
+        }
+        if (response.results.isNotEmpty) {
+          final topResult = response.results.first;
+          return '${topResult.snippet} (Source: ${topResult.title})';
+        }
+        return 'I found no results online for "$query".';
+      } else {
+        return 'I was unable to search the web right now. ${result.message}';
+      }
     }
   }
+
+  bool _isDuplicateRecipe(Recipe r1, Recipe r2) {
+    final name1 = _norm(r1.name);
+    final name2 = _norm(r2.name);
+
+    if (name1 == name2) return true;
+
+    final stopwords = {
+      'recipe',
+      'easy',
+      'quick',
+      'style',
+      'cooked',
+      'smart',
+      'best',
+      'delicious',
+      'simple',
+      'traditional',
+      'authentic',
+      'homemade',
+      'the',
+      'a',
+      'an',
+      'and',
+      'with',
+      'for',
+      'in',
+      'of',
+      'on',
+      'at',
+      'to',
+      'how',
+      'make',
+      'cook',
+      'dish',
+      'food',
+    };
+
+    Set<String> getTokens(String name) {
+      return name
+          .split(' ')
+          .map((w) => w.trim())
+          .where((w) => w.length > 2 && !stopwords.contains(w))
+          .toSet();
+    }
+
+    final tokens1 = getTokens(name1);
+    final tokens2 = getTokens(name2);
+
+    if (tokens1.isEmpty || tokens2.isEmpty) {
+      return name1.contains(name2) || name2.contains(name1);
+    }
+
+    final intersection = tokens1.intersection(tokens2);
+    final union = tokens1.union(tokens2);
+    final similarity = intersection.length / union.length;
+
+    if (similarity >= 0.6) return true;
+
+    if (intersection.length == tokens1.length ||
+        intersection.length == tokens2.length) {
+      if (intersection.isNotEmpty) return true;
+    }
+
+    return false;
+  }
+
+  bool isDuplicateRecipePublic(Recipe r1, Recipe r2) =>
+      _isDuplicateRecipe(r1, r2);
 
   String _handleUnknown(
     String rawInput,

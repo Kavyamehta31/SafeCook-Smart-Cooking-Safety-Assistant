@@ -6,25 +6,29 @@ import 'models/recipe.dart';
 import 'data/recipes.dart';
 import 'screens/recipe_list_screen.dart';
 import 'screens/cooking_guidance_screen.dart';
+import 'screens/memory_screen.dart';
 import 'services/speech_service.dart';
 import 'services/voice_service.dart';
 import 'services/voice_assistant_service.dart';
 import 'services/wake_word_service.dart';
 import 'agent/safecook_agent.dart';
-import 'agent/safecook_context.dart';
 import 'agent/safecook_tools.dart';
 import 'safety/safecook_safety_engine.dart';
 import 'safety/safecook_safety_state.dart';
 import 'safety/safecook_safety_event.dart';
 import 'safety/safecook_safety_voice_controller.dart';
 import 'services/preference_service.dart';
+import 'theme/safecook_theme.dart';
+import 'widgets/safecook_widgets.dart';
 
 // SafeCook Safety Thresholds
-const int kGasNormalMax = 300;     // Gas levels < 300 are Normal
-const int kGasWarningMax = 600;    // Gas levels 300 to 599 are Warning, >= 600 are Critical
+const int kGasNormalMax = 300; // Gas levels < 300 are Normal
+const int kGasWarningMax =
+    600; // Gas levels 300 to 599 are Warning, >= 600 are Critical
 
-const double kDistanceSafeMin = 30.0;    // Distance > 30 cm is Safe
-const double kDistanceWarningMin = 15.0; // Distance 15 to 30 cm is Close, < 15 cm is Very Close
+const double kDistanceSafeMin = 30.0; // Distance > 30 cm is Safe
+const double kDistanceWarningMin =
+    15.0; // Distance 15 to 30 cm is Close, < 15 cm is Very Close
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -143,21 +147,7 @@ class SafeCookBluetoothTestApp extends StatelessWidget {
     return MaterialApp(
       title: 'SafeCook Bluetooth Test',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF38BDF8), // sky blue
-          secondary: Color(0xFF0EA5E9),
-          surface: Color(0xFF1E293B),
-          error: Color(0xFFEF4444),
-        ),
-        scaffoldBackgroundColor: const Color(0xFF0F172A),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF1E293B),
-          elevation: 0,
-        ),
-      ),
+      theme: buildSafeCookTheme(),
       home: const BluetoothTestPage(),
     );
   }
@@ -171,34 +161,35 @@ class BluetoothTestPage extends StatefulWidget {
   State<BluetoothTestPage> createState() => BluetoothTestPageState();
 }
 
-class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyVoiceDelegate {
+class BluetoothTestPageState extends State<BluetoothTestPage>
+    implements SafetyVoiceDelegate {
   static const _methodChannel = MethodChannel('com.safecook.bluetooth/methods');
   static const _eventChannel = EventChannel('com.safecook.bluetooth/events');
-  
+
   StreamSubscription? _eventChannelSub;
   StreamSubscription? _safetySubscription;
 
   ClassicAdapterState _adapterState = ClassicAdapterState.unknown;
-  
+
   List<BluetoothDevice> _bondedDevices = [];
   final List<BluetoothDevice> _discoveredDevices = [];
-  
+
   bool _isScanning = false;
   bool _isConnecting = false;
-  
+
   BluetoothDevice? _connectedDevice;
-  
+
   String _connectionStatus = 'Disconnected';
   String? _connectedDeviceAddress;
   String? _connectedDeviceName;
-  
-  String _consoleText = '';
+
   Timer? _sensorFreshnessTimer;
   Completer<bool>? _connectionCompleter;
-  final ScrollController _scrollController = ScrollController();
-  
+
   bool _showPaired = true; // Tab toggle: true = Paired, false = Scanned
   bool _showBluetoothSettings = false;
+  bool _showPreferences = false;
+  bool _showDiagnostics = false;
 
   // Safety Listeners
   final List<VoidCallback> _sensorListeners = [];
@@ -246,25 +237,31 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   Future<ToolResult> connectBluetoothFromVoice() async {
     final eventId = DateTime.now().millisecondsSinceEpoch;
     if (_connectedDevice != null) {
-      debugPrint('[SafeCook BT]\n'
-          'eventId=$eventId\n'
-          'recognized="connect sensor"\n'
-          'intent=connectBluetooth\n'
-          'tool=connectBluetooth\n'
-          'nativeOperationStarted=false\n'
-          'actualConnected=true');
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=false\n'
+        'actualConnected=true',
+      );
       return const ToolResult.ok('Already connected');
     }
     if (_bondedDevices.isEmpty) {
-      debugPrint('[SafeCook BT]\n'
-          'eventId=$eventId\n'
-          'recognized="connect sensor"\n'
-          'intent=connectBluetooth\n'
-          'tool=connectBluetooth\n'
-          'nativeOperationStarted=false\n'
-          'actualConnected=false\n'
-          'failureStage=no_paired_devices');
-      return const ToolResult.fail('No paired devices found. Pair the HC-05 in system settings first.');
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=false\n'
+        'actualConnected=false\n'
+        'failureStage=no_paired_devices',
+      );
+      return const ToolResult.fail(
+        'No paired devices found. Pair the HC-05 in system settings first.',
+      );
     }
 
     // Prioritized search:
@@ -274,7 +271,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     // 4. Name containing "hc05" (Priority 4)
     // 5. Name containing "stove" (Priority 5)
     // 6. Name containing "sensor" (Priority 6)
-    
+
     BluetoothDevice? targetDevice;
     List<BluetoothDevice> candidates = [];
     int bestScore = 999;
@@ -307,36 +304,44 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     }
 
     if (candidates.isEmpty) {
-      debugPrint('[SafeCook BT]\n'
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=false\n'
+        'pairedDeviceFound=false\n'
+        'actualConnected=false\n'
+        'failureStage=no_matching_device',
+      );
+      return const ToolResult.fail(
+        "I couldn't find the paired HC-05 stove sensor. Please make sure HC-05 is paired and powered on.",
+      );
+    }
+
+    if (candidates.length > 1) {
+      // Prefer exact "HC-05"
+      final exactMatchList = candidates
+          .where((d) => d.name.toLowerCase().trim() == 'hc-05')
+          .toList();
+      if (exactMatchList.length == 1) {
+        targetDevice = exactMatchList.first;
+      } else {
+        debugPrint(
+          '[SafeCook BT]\n'
           'eventId=$eventId\n'
           'recognized="connect sensor"\n'
           'intent=connectBluetooth\n'
           'tool=connectBluetooth\n'
           'nativeOperationStarted=false\n'
-          'pairedDeviceFound=false\n'
+          'pairedDeviceFound=true\n'
           'actualConnected=false\n'
-          'failureStage=no_matching_device');
-      return const ToolResult.fail(
-          "I couldn't find the paired HC-05 stove sensor. Please make sure HC-05 is paired and powered on.");
-    }
-
-    if (candidates.length > 1) {
-      // Prefer exact "HC-05"
-      final exactMatchList = candidates.where((d) => d.name.toLowerCase().trim() == 'hc-05').toList();
-      if (exactMatchList.length == 1) {
-        targetDevice = exactMatchList.first;
-      } else {
-        debugPrint('[SafeCook BT]\n'
-            'eventId=$eventId\n'
-            'recognized="connect sensor"\n'
-            'intent=connectBluetooth\n'
-            'tool=connectBluetooth\n'
-            'nativeOperationStarted=false\n'
-            'pairedDeviceFound=true\n'
-            'actualConnected=false\n'
-            'failureStage=ambiguous_matches');
+          'failureStage=ambiguous_matches',
+        );
         return const ToolResult.fail(
-            "Multiple matching stove sensors found. Please select or identify the stove sensor manually.");
+          "Multiple matching stove sensors found. Please select or identify the stove sensor manually.",
+        );
       }
     } else {
       targetDevice = candidates.first;
@@ -350,71 +355,83 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         _connectedDevice = matchedDevice;
         _connectionStatus = 'Connected';
       });
-      debugPrint('[SafeCook BT]\n'
-          'eventId=$eventId\n'
-          'recognized="connect sensor"\n'
-          'intent=connectBluetooth\n'
-          'tool=connectBluetooth\n'
-          'nativeOperationStarted=true\n'
-          'targetDevice=${matchedDevice.name}\n'
-          'targetAddress=${matchedDevice.address}\n'
-          'pairedDeviceFound=true\n'
-          'actualConnected=true');
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=true\n'
+        'targetDevice=${matchedDevice.name}\n'
+        'targetAddress=${matchedDevice.address}\n'
+        'pairedDeviceFound=true\n'
+        'actualConnected=true',
+      );
       return const ToolResult.ok('Connected to stove sensor');
     }
 
     try {
       _connectionCompleter = Completer<bool>();
       await _connectToDevice(matchedDevice);
-      
-      debugPrint('[SafeCook BT]\n'
-          'eventId=$eventId\n'
-          'recognized="connect sensor"\n'
-          'intent=connectBluetooth\n'
-          'tool=connectBluetooth\n'
-          'nativeOperationStarted=true\n'
-          'targetDevice=${matchedDevice.name}\n'
-          'targetAddress=${matchedDevice.address}\n'
-          'pairedDeviceFound=true\n'
-          'nativeMethod=connect');
+
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=true\n'
+        'targetDevice=${matchedDevice.name}\n'
+        'targetAddress=${matchedDevice.address}\n'
+        'pairedDeviceFound=true\n'
+        'nativeMethod=connect',
+      );
 
       final success = await _connectionCompleter!.future.timeout(
-        const Duration(seconds: 10), // allow time for connection, discovery, and notification enable
+        const Duration(
+          seconds: 10,
+        ), // allow time for connection, discovery, and notification enable
         onTimeout: () => false,
       );
       _connectionCompleter = null;
 
-      debugPrint('[SafeCook BT]\n'
-          'eventId=$eventId\n'
-          'recognized="connect sensor"\n'
-          'intent=connectBluetooth\n'
-          'tool=connectBluetooth\n'
-          'nativeOperationStarted=true\n'
-          'targetDevice=${matchedDevice.name}\n'
-          'targetAddress=${matchedDevice.address}\n'
-          'pairedDeviceFound=true\n'
-          'connectionEvent=${success ? "success" : "failed"}\n'
-          'actualConnected=$success');
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=true\n'
+        'targetDevice=${matchedDevice.name}\n'
+        'targetAddress=${matchedDevice.address}\n'
+        'pairedDeviceFound=true\n'
+        'connectionEvent=${success ? "success" : "failed"}\n'
+        'actualConnected=$success',
+      );
 
       if (success) {
         return const ToolResult.ok('Connected to stove sensor');
       } else {
-        return const ToolResult.fail('Could not establish connection to the stove sensor.');
+        return const ToolResult.fail(
+          'Could not establish connection to the stove sensor.',
+        );
       }
     } catch (e) {
       _connectionCompleter = null;
-      debugPrint('[SafeCook BT]\n'
-          'eventId=$eventId\n'
-          'recognized="connect sensor"\n'
-          'intent=connectBluetooth\n'
-          'tool=connectBluetooth\n'
-          'nativeOperationStarted=true\n'
-          'targetDevice=${matchedDevice.name}\n'
-          'targetAddress=${matchedDevice.address}\n'
-          'pairedDeviceFound=true\n'
-          'connectionEvent=error\n'
-          'actualConnected=false\n'
-          'failureStage=exception');
+      debugPrint(
+        '[SafeCook BT]\n'
+        'eventId=$eventId\n'
+        'recognized="connect sensor"\n'
+        'intent=connectBluetooth\n'
+        'tool=connectBluetooth\n'
+        'nativeOperationStarted=true\n'
+        'targetDevice=${matchedDevice.name}\n'
+        'targetAddress=${matchedDevice.address}\n'
+        'pairedDeviceFound=true\n'
+        'connectionEvent=error\n'
+        'actualConnected=false\n'
+        'failureStage=exception',
+      );
       return ToolResult.fail('Connection error: $e');
     }
   }
@@ -437,7 +454,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     }
     return const ToolResult.fail('Not connected');
   }
-  
+
   // Sensor Parsing State Variables
   int? _gasValue;
   String? _distanceValue;
@@ -447,10 +464,11 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   final List<SafetyEvent> _safetyHistory = [];
   final List<SensorDataPoint> _gasChartData = [];
   final List<SensorDataPoint> _distChartData = [];
-  
+
   // Cooking Session State Variables
   bool get _isCookingActive => SafeCookAgent().memory.isCookingActive;
-  set _isCookingActive(bool val) => SafeCookAgent().memory.isCookingActive = val;
+  set _isCookingActive(bool val) =>
+      SafeCookAgent().memory.isCookingActive = val;
   bool _showSessionSummary = false;
   Timer? _sessionTimer;
   Duration _sessionDuration = Duration.zero;
@@ -478,15 +496,17 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   String _userSpokenText = '';
   String _assistantReplyText = '';
   int _consecutiveSilenceTurns = 0;
+  final VoiceConversationMode _voiceConversation = VoiceConversationMode();
+  bool _voiceListenStarting = false;
   final SpeechService _speechService = SpeechService();
   final VoiceAssistantService _assistantService = VoiceAssistantService();
   final VoiceService _voiceService = VoiceService();
-  
+
   // Custom colors for status UI
   static const Color _greenAccent = Color(0xFF10B981);
   static const Color _greenBg = Color(0x2610B981); // 15% opacity
   static const Color _greenBorder = Color(0x8010B981); // 50% opacity
-  
+
   static const Color _redAccent = Color(0xFFEF4444);
   static const Color _redBg = Color(0x26EF4444); // 15% opacity
   static const Color _redBorder = Color(0x80EF4444); // 50% opacity
@@ -494,15 +514,15 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   static const Color _amberAccent = Color(0xFFF59E0B);
   static const Color _amberBg = Color(0x26F59E0B); // 15% opacity
   static const Color _amberBorder = Color(0x80F59E0B); // 50% opacity
-  
+
   Color _gasStatusColor = Colors.white54;
   Color _distanceStatusColor = Colors.white54;
-  
+
   @override
   void initState() {
     super.initState();
     _resetDashboard();
-    
+
     SafetyVoiceController().registerHomeScreen(this);
     _safetySubscription = SafeCookSafetyEngine().onSafetyEvent.listen((event) {
       if (mounted) {
@@ -519,15 +539,24 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
           }
           if (_isCookingActive) {
             _sessionSafetyHistory.add(newEvent);
-            if (event.currentState == SafeCookSafetyState.caution) _sessionCautionCount++;
-            if (event.currentState == SafeCookSafetyState.gasAlert) _sessionGasAlertCount++;
-            if (event.currentState == SafeCookSafetyState.distanceAlert) _sessionDistanceAlertCount++;
-            if (event.currentState == SafeCookSafetyState.critical) _sessionCriticalCount++;
+            if (event.currentState == SafeCookSafetyState.caution) {
+              _sessionCautionCount++;
+            }
+            if (event.currentState == SafeCookSafetyState.gasAlert) {
+              _sessionGasAlertCount++;
+            }
+            if (event.currentState == SafeCookSafetyState.distanceAlert) {
+              _sessionDistanceAlertCount++;
+            }
+            if (event.currentState == SafeCookSafetyState.critical) {
+              _sessionCriticalCount++;
+            }
           }
         });
-        
+
         final stateStr = _mapStateToString(event.currentState);
-        if (event.currentState != SafeCookSafetyState.safe && event.currentState != SafeCookSafetyState.sensorUnavailable) {
+        if (event.currentState != SafeCookSafetyState.safe &&
+            event.currentState != SafeCookSafetyState.sensorUnavailable) {
           _triggerVibrationAndSound(stateStr);
         }
       }
@@ -536,7 +565,9 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     if (!BluetoothTestPage.isTesting) {
       _initBluetooth();
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _voiceService.speak("Welcome to SafeCook. Say Hello SafeCook when you're ready.");
+        _voiceService.speak(
+          "Welcome to SafeCook. Say Hello SafeCook when you're ready.",
+        );
         _startWakeWordDetection();
       });
     }
@@ -567,7 +598,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       _voiceService.speak(text);
     }
   }
-  
+
   void _resetDashboard() {
     SafeCookSafetyEngine().reset();
     _gasValue = null;
@@ -653,8 +684,6 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     }
   }
 
-
-
   Future<void> _triggerVibrationAndSound(String state) async {
     try {
       await SystemSound.play(SystemSoundType.alert);
@@ -699,17 +728,24 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     final borderColor = _getCombinedStatusBorderColor();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.only(bottom: 12.0),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: borderColor, width: 1.5),
+          borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+          border: Border.all(color: borderColor, width: 1.0),
         ),
         child: Row(
           children: [
-            Icon(Icons.warning, color: color, size: 24),
+            Icon(
+              status == 'CRITICAL'
+                  ? Icons.gpp_bad_rounded
+                  : Icons.warning_amber_rounded,
+              color: color,
+              size: 24,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -718,8 +754,9 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                   Text(
                     'SAFETY ALERT: $status',
                     style: TextStyle(
+                      fontFamily: 'Nunito',
                       color: color,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w800,
                       fontSize: 12,
                       letterSpacing: 0.5,
                     ),
@@ -728,7 +765,8 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                   Text(
                     message,
                     style: const TextStyle(
-                      color: Colors.white,
+                      fontFamily: 'Nunito',
+                      color: SafeCookColors.textPrimary,
                       fontSize: 13,
                       height: 1.3,
                     ),
@@ -802,7 +840,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
   Widget _buildSafetyHistory() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.only(top: SafeCookSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -811,35 +849,48 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
             children: [
               const Text(
                 'SAFETY EVENT HISTORY',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white70,
-                  letterSpacing: 1,
-                ),
+                style: SafeCookTextStyles.label,
               ),
               if (_safetyHistory.isNotEmpty)
                 TextButton.icon(
                   onPressed: _clearSafetyHistory,
-                  icon: const Icon(Icons.clear_all, size: 16, color: Colors.white54),
-                  label: const Text('Clear History', style: TextStyle(fontSize: 11, color: Colors.white54)),
+                  icon: const Icon(
+                    Icons.clear_all_rounded,
+                    size: 16,
+                    color: SafeCookColors.textSecondary,
+                  ),
+                  label: const Text(
+                    'Clear History',
+                    style: TextStyle(
+                      fontFamily: 'Nunito',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: SafeCookColors.textSecondary,
+                    ),
+                  ),
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 6),
-          Card(
-            color: const Color(0xFF1E293B),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          const SizedBox(height: 8),
+          SCCard(
+            padding: EdgeInsets.zero,
             child: _safetyHistory.isEmpty
                 ? const Padding(
-                    padding: EdgeInsets.all(16.0),
+                    padding: EdgeInsets.all(24.0),
                     child: Center(
                       child: Text(
                         'No events logged yet.',
-                        style: TextStyle(color: Colors.white30, fontSize: 13),
+                        style: TextStyle(
+                          fontFamily: 'Nunito',
+                          color: SafeCookColors.textMuted,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   )
@@ -847,13 +898,17 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _safetyHistory.length,
-                    separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                    separatorBuilder: (context, index) =>
+                        const Divider(color: SafeCookColors.divider, height: 1),
                     itemBuilder: (context, index) {
                       final event = _safetyHistory[index];
                       final stateColor = _getHistoryStateColor(event.state);
-                      
+
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14.0,
+                          vertical: 10.0,
+                        ),
                         child: Row(
                           children: [
                             Text(
@@ -861,23 +916,34 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                               style: const TextStyle(
                                 fontFamily: 'monospace',
                                 fontSize: 12,
-                                color: Colors.white54,
+                                color: SafeCookColors.textSecondary,
                               ),
                             ),
                             const SizedBox(width: 12),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
                                 color: _getHistoryStateBgColor(event.state),
-                                border: Border.all(color: _getHistoryStateBorderColor(event.state)),
-                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: _getHistoryStateBorderColor(
+                                    event.state,
+                                  ),
+                                ),
+                                borderRadius: BorderRadius.circular(
+                                  SafeCookRadius.xs,
+                                ),
                               ),
                               child: Text(
                                 event.state,
                                 style: TextStyle(
+                                  fontFamily: 'Nunito',
                                   color: stateColor,
                                   fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.3,
                                 ),
                               ),
                             ),
@@ -886,8 +952,10 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                               child: Text(
                                 'Gas: ${event.gasValue ?? '--'} | Dist: ${event.distanceValue ?? '--'}',
                                 style: const TextStyle(
+                                  fontFamily: 'Nunito',
                                   fontSize: 12,
-                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w600,
+                                  color: SafeCookColors.textPrimary,
                                 ),
                                 textAlign: TextAlign.right,
                                 overflow: TextOverflow.ellipsis,
@@ -931,6 +999,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
   void _endCookingSession() {
     _sessionTimer?.cancel();
+    SafeCookAgent().endCookingSession();
     setState(() {
       _isCookingActive = false;
       _showSessionSummary = true;
@@ -946,122 +1015,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   }
 
   Widget _buildCookingSessionControl() {
-    final formatDuration = _formatDuration(_sessionDuration);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'COOKING SESSION MODE',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: Colors.white70,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: const Color(0xFF1E293B),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  if (_isCookingActive) ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.restaurant, color: Color(0xFF38BDF8), size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'COOKING SESSION ACTIVE',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF38BDF8),
-                                fontSize: 14,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          formatDuration,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: _endCookingSession,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade900,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 44),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      icon: const Icon(Icons.stop),
-                      label: const Text('END SESSION', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ] else ...[
-                    ElevatedButton.icon(
-                      onPressed: _startCookingSession,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0EA5E9),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 44),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('START COOKING', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                  if (_showSessionSummary) ...[
-                    const SizedBox(height: 16),
-                    const Divider(color: Colors.white10, height: 1),
-                    const SizedBox(height: 16),
-                    const Row(
-                      children: [
-                        Icon(Icons.assessment, color: Colors.white70, size: 18),
-                        SizedBox(width: 8),
-                        Text(
-                          'SESSION SUMMARY',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildSummaryItem('Duration', formatDuration),
-                    _buildSummaryItem('Maximum Gas', _sessionMaxGas != null ? '$_sessionMaxGas' : 'N/A'),
-                    _buildSummaryItem('Minimum Distance', _sessionMinDistance != null ? '${_sessionMinDistance!.toStringAsFixed(2)} cm' : 'N/A'),
-                    _buildSummaryItem('Total Alerts', '${_sessionCautionCount + _sessionGasAlertCount + _sessionDistanceAlertCount}'),
-                    _buildSummaryItem('Critical Events', '$_sessionCriticalCount'),
-                    _buildSummaryItem('Final Safety State', _sessionFinalSafetyState, color: _getHistoryStateColor(_sessionFinalSafetyState)),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+    return _buildSessionSummaryCard();
   }
 
   Widget _buildSummaryItem(String label, String value, {Color? color}) {
@@ -1070,12 +1024,20 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: 'Nunito',
+              color: SafeCookColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
           Text(
             value,
             style: TextStyle(
-              color: color ?? Colors.white,
-              fontWeight: FontWeight.bold,
+              fontFamily: 'Nunito',
+              color: color ?? SafeCookColors.textPrimary,
+              fontWeight: FontWeight.w700,
               fontSize: 13,
             ),
           ),
@@ -1086,7 +1048,9 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
   void _addGasChartData(double value) {
     setState(() {
-      _gasChartData.add(SensorDataPoint(timestamp: DateTime.now(), value: value));
+      _gasChartData.add(
+        SensorDataPoint(timestamp: DateTime.now(), value: value),
+      );
       if (_gasChartData.length > 60) {
         _gasChartData.removeAt(0);
       }
@@ -1095,7 +1059,9 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
   void _addDistChartData(double value) {
     setState(() {
-      _distChartData.add(SensorDataPoint(timestamp: DateTime.now(), value: value));
+      _distChartData.add(
+        SensorDataPoint(timestamp: DateTime.now(), value: value),
+      );
       if (_distChartData.length > 60) {
         _distChartData.removeAt(0);
       }
@@ -1104,86 +1070,97 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
   Widget _buildLiveTrends() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.only(top: SafeCookSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'LIVE SENSOR TRENDS (LAST 60S)',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: Colors.white70,
-              letterSpacing: 1,
-            ),
+            style: SafeCookTextStyles.label,
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
-                child: Card(
-                  color: const Color(0xFF1E293B),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Gas Trend (Raw)',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                child: SCCard(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Gas Trend (Raw)',
+                        style: TextStyle(
+                          fontFamily: 'Nunito',
+                          color: SafeCookColors.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          height: 80,
-                          width: double.infinity,
-                          child: _gasChartData.isEmpty
-                              ? const Center(
-                                  child: Text('No data yet', style: TextStyle(color: Colors.white24, fontSize: 12)),
-                                )
-                              : CustomPaint(
-                                  painter: MiniLineChartPainter(
-                                    data: _gasChartData,
-                                    lineColor: const Color(0xFF38BDF8),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 80,
+                        width: double.infinity,
+                        child: _gasChartData.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No data yet',
+                                  style: TextStyle(
+                                    fontFamily: 'Nunito',
+                                    color: SafeCookColors.textMuted,
+                                    fontSize: 12,
                                   ),
                                 ),
-                        ),
-                      ],
-                    ),
+                              )
+                            : CustomPaint(
+                                painter: MiniLineChartPainter(
+                                  data: _gasChartData,
+                                  lineColor: SafeCookColors.primaryLight,
+                                ),
+                              ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
-                child: Card(
-                  color: const Color(0xFF1E293B),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Distance Trend (cm)',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                child: SCCard(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Distance Trend (cm)',
+                        style: TextStyle(
+                          fontFamily: 'Nunito',
+                          color: SafeCookColors.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          height: 80,
-                          width: double.infinity,
-                          child: _distChartData.isEmpty
-                              ? const Center(
-                                  child: Text('No data yet', style: TextStyle(color: Colors.white24, fontSize: 12)),
-                                )
-                              : CustomPaint(
-                                  painter: MiniLineChartPainter(
-                                    data: _distChartData,
-                                    lineColor: const Color(0xFF10B981),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 80,
+                        width: double.infinity,
+                        child: _distChartData.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No data yet',
+                                  style: TextStyle(
+                                    fontFamily: 'Nunito',
+                                    color: SafeCookColors.textMuted,
+                                    fontSize: 12,
                                   ),
                                 ),
-                        ),
-                      ],
-                    ),
+                              )
+                            : CustomPaint(
+                                painter: MiniLineChartPainter(
+                                  data: _distChartData,
+                                  lineColor: SafeCookColors.safe,
+                                ),
+                              ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1196,143 +1173,150 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
   void _log(String message) {
     debugPrint("[SafeCook Classic Debug] $message");
-    if (mounted) {
-      setState(() {
-        _consoleText += "[DEBUG] $message\n";
-        if (_consoleText.length > 8000) {
-          _consoleText = _consoleText.substring(_consoleText.length - 4000);
-        }
-      });
-      // Scroll to bottom when logging diagnostic messages
-      Timer(const Duration(milliseconds: 50), _scrollToBottom);
-    }
   }
-  
+
   void _startEventChannelListener() {
-    _eventChannelSub = _eventChannel.receiveBroadcastStream().listen((data) {
-      if (data is Map) {
-        final event = data['event'] as String?;
-        final value = data['value'];
-        
-        switch (event) {
-          case 'status':
-            final statusVal = value as String?;
-            _log('[SafeCook BLE] status: $statusVal');
-            if (statusVal == 'connecting') {
-              setState(() {
-                _connectionStatus = 'Connecting...';
-                _isConnecting = true;
-              });
-            } else if (statusVal == 'connected') {
-              setState(() {
-                _connectionStatus = 'Connected';
-                _isConnecting = false;
-                _connectedDevice = _bondedDevices.firstWhere(
-                  (d) => d.address == _connectedDeviceAddress,
-                  orElse: () => BluetoothDevice(name: _connectedDeviceName ?? 'HC-05', address: _connectedDeviceAddress ?? '', bondState: 'bonded'),
-                );
-              });
-            } else if (statusVal == 'services_discovered') {
-              setState(() {
-                _connectionStatus = 'Connected';
-              });
-            } else if (statusVal == 'notifications_enabled') {
-              setState(() {
-                _connectionStatus = 'Connected';
-              });
-              if (_connectionCompleter != null && !_connectionCompleter!.isCompleted) {
-                _connectionCompleter!.complete(true);
-              }
-            } else if (statusVal == 'disconnected') {
-              _handleDisconnect();
-              if (_connectionCompleter != null && !_connectionCompleter!.isCompleted) {
-                _connectionCompleter!.complete(false);
-              }
-            }
-            break;
-            
-          case 'read':
-            final bytes = value as Uint8List?;
-            if (bytes != null) {
-              debugPrint('[SafeCook BLE] RX bytes: ${bytes.length}');
-              
-              final text = utf8.decode(bytes, allowMalformed: true);
-              // Phase 0 perf fix: accumulate data without triggering setState
-              // on every BLE packet.  Only setState when sensor parsing changes
-              // meaningful display state (_parseSensorData already calls setState).
-              if (mounted) {
-                _consoleText += text;
-                if (_consoleText.length > 8000) {
-                  _consoleText = _consoleText.substring(_consoleText.length - 4000);
+    _eventChannelSub = _eventChannel.receiveBroadcastStream().listen(
+      (data) {
+        if (data is Map) {
+          final event = data['event'] as String?;
+          final value = data['value'];
+
+          switch (event) {
+            case 'status':
+              final statusVal = value as String?;
+              _log('[SafeCook BLE] status: $statusVal');
+              if (statusVal == 'connecting') {
+                setState(() {
+                  _connectionStatus = 'Connecting...';
+                  _isConnecting = true;
+                });
+              } else if (statusVal == 'connected') {
+                setState(() {
+                  _connectionStatus = 'Connected';
+                  _isConnecting = false;
+                  _connectedDevice = _bondedDevices.firstWhere(
+                    (d) => d.address == _connectedDeviceAddress,
+                    orElse: () => BluetoothDevice(
+                      name: _connectedDeviceName ?? 'HC-05',
+                      address: _connectedDeviceAddress ?? '',
+                      bondState: 'bonded',
+                    ),
+                  );
+                });
+              } else if (statusVal == 'services_discovered') {
+                setState(() {
+                  _connectionStatus = 'Connected';
+                });
+              } else if (statusVal == 'notifications_enabled') {
+                setState(() {
+                  _connectionStatus = 'Connected';
+                });
+                if (_connectionCompleter != null &&
+                    !_connectionCompleter!.isCompleted) {
+                  _connectionCompleter!.complete(true);
                 }
-                _incomingAccumulator += text;
-                if (_incomingAccumulator.length > 4096) {
-                  _incomingAccumulator = _incomingAccumulator.substring(_incomingAccumulator.length - 1024);
+              } else if (statusVal == 'disconnected') {
+                _handleDisconnect();
+                if (_connectionCompleter != null &&
+                    !_connectionCompleter!.isCompleted) {
+                  _connectionCompleter!.complete(false);
                 }
-                
-                while (_incomingAccumulator.contains('\n')) {
-                  final index = _incomingAccumulator.indexOf('\n');
-                  final line = _incomingAccumulator.substring(0, index).trim();
-                  _incomingAccumulator = _incomingAccumulator.substring(index + 1);
-                  if (line.isNotEmpty) {
-                    _parseSensorData(line);
+              }
+              break;
+
+            case 'read':
+              final bytes = value as Uint8List?;
+              if (bytes != null) {
+                debugPrint('[SafeCook BLE] RX bytes: ${bytes.length}');
+
+                final text = utf8.decode(bytes, allowMalformed: true);
+                // Accumulate fragmented BLE packets without exposing raw serial
+                // output in the normal home UI.
+                if (mounted) {
+                  _incomingAccumulator += text;
+                  if (_incomingAccumulator.length > 4096) {
+                    _incomingAccumulator = _incomingAccumulator.substring(
+                      _incomingAccumulator.length - 1024,
+                    );
+                  }
+
+                  while (_incomingAccumulator.contains('\n')) {
+                    final index = _incomingAccumulator.indexOf('\n');
+                    final line = _incomingAccumulator
+                        .substring(0, index)
+                        .trim();
+                    _incomingAccumulator = _incomingAccumulator.substring(
+                      index + 1,
+                    );
+                    if (line.isNotEmpty) {
+                      _parseSensorData(line);
+                    }
                   }
                 }
               }
-            }
-            break;
-            
-          case 'error':
-            final errorMsg = value as String?;
-            _log('[SafeCook BLE] Error: $errorMsg');
-            if (_connectionCompleter != null && !_connectionCompleter!.isCompleted) {
-              _connectionCompleter!.complete(false);
-            }
-            break;
+              break;
+
+            case 'error':
+              final errorMsg = value as String?;
+              _log('[SafeCook BLE] Error: $errorMsg');
+              if (_connectionCompleter != null &&
+                  !_connectionCompleter!.isCompleted) {
+                _connectionCompleter!.complete(false);
+              }
+              break;
+          }
         }
-      }
-    }, onError: (err) {
-      _log("[SafeCook Native BT] Stream error: $err");
-    });
+      },
+      onError: (err) {
+        _log("[SafeCook Native BT] Stream error: $err");
+      },
+    );
   }
 
   Future<void> _initBluetooth() async {
     _log("Initializing native Bluetooth channels...");
     try {
-      final isEnabled = await _methodChannel.invokeMethod<bool>('getBluetoothState') ?? false;
+      final isEnabled =
+          await _methodChannel.invokeMethod<bool>('getBluetoothState') ?? false;
       if (mounted) {
         setState(() {
-          _adapterState = isEnabled ? ClassicAdapterState.on : ClassicAdapterState.off;
+          _adapterState = isEnabled
+              ? ClassicAdapterState.on
+              : ClassicAdapterState.off;
         });
       }
       _startEventChannelListener();
     } catch (e) {
       _log("Error during Bluetooth initialization: $e");
     }
-    
+
     // Fetch bonded list
     _getBondedDevices();
   }
-  
+
   Future<void> _getBondedDevices() async {
     try {
-      final isEnabled = await _methodChannel.invokeMethod<bool>('getBluetoothState') ?? false;
+      final isEnabled =
+          await _methodChannel.invokeMethod<bool>('getBluetoothState') ?? false;
       _log("[SafeCook BT DEBUG] Bluetooth enabled: $isEnabled");
-      
-      final List? devicesList = await _methodChannel.invokeMethod<List>('getBondedDevices');
+
+      final List? devicesList = await _methodChannel.invokeMethod<List>(
+        'getBondedDevices',
+      );
       final devices = (devicesList ?? [])
           .map((d) => BluetoothDevice.fromMap(d as Map))
           .toList();
-      
+
       _log("[SafeCook BT DEBUG] getPairedDevices returned: ${devices.length}");
-      
+
       for (var device in devices) {
         _log("[SafeCook BT DEBUG] name=${device.name}");
         _log("[SafeCook BT DEBUG] displayName=${device.name}");
         _log("[SafeCook BT DEBUG] address=${device.address}");
         _log("[SafeCook BT DEBUG] bondState=${device.bondState}");
       }
-      
+
       if (mounted) {
         setState(() {
           _bondedDevices = devices;
@@ -1342,7 +1326,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       _log("[SafeCook BT DEBUG] Error fetching paired devices: $e");
     }
   }
-  
+
   void _startScan() {
     setState(() {
       _isScanning = true;
@@ -1357,13 +1341,13 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       }
     });
   }
-  
+
   void _stopScan() {
     setState(() {
       _isScanning = false;
     });
   }
-  
+
   void _parseSensorData(String line) {
     try {
       // Expected formats:
@@ -1371,7 +1355,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       // GAS:263,DIST:NO_ECHO
       final regExp = RegExp(r'GAS:(\d+),DIST:(NO_ECHO|[\d\.]+)');
       final match = regExp.firstMatch(line);
-      
+
       if (match != null) {
         _sensorFreshnessTimer?.cancel();
         _sensorFreshnessTimer = Timer(const Duration(seconds: 5), () {
@@ -1390,12 +1374,12 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
             _notifySensorListeners();
           }
         });
-        
+
         final gasStr = match.group(1);
         final distStr = match.group(2);
-        
+
         bool hasChanges = false;
-        
+
         if (gasStr != null) {
           final val = int.tryParse(gasStr);
           if (val != null) {
@@ -1430,7 +1414,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
             }
           }
         }
-        
+
         if (distStr != null) {
           if (distStr == 'NO_ECHO') {
             if (_distanceValue != 'No Echo') {
@@ -1475,10 +1459,14 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
             }
           }
         }
-        
-        final double? gasPercent = _gasValue != null ? GasCalibration.toPercent(_gasValue!) : null;
-        final double? distanceCm = (distStr != null && distStr != 'NO_ECHO') ? double.tryParse(distStr) : null;
-        
+
+        final double? gasPercent = _gasValue != null
+            ? GasCalibration.toPercent(_gasValue!)
+            : null;
+        final double? distanceCm = (distStr != null && distStr != 'NO_ECHO')
+            ? double.tryParse(distStr)
+            : null;
+
         final prevEngineState = SafeCookSafetyEngine().currentState;
         SafeCookSafetyEngine().updateSensorData(
           gasPercentage: gasPercent,
@@ -1488,7 +1476,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         if (SafeCookSafetyEngine().currentState != prevEngineState) {
           hasChanges = true;
         }
-        
+
         if (hasChanges && mounted) {
           setState(() {});
         }
@@ -1503,15 +1491,17 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   void simulateSensorData(String line) {
     _parseSensorData(line);
   }
-  
+
   Future<void> _connectToDevice(BluetoothDevice device) async {
     if (_isConnecting) {
-      _log("Connection attempt ignored: another connection is already in progress.");
+      _log(
+        "Connection attempt ignored: another connection is already in progress.",
+      );
       return;
     }
-    
+
     _stopScan();
-    
+
     setState(() {
       _isConnecting = true;
       _connectionStatus = 'Connecting...';
@@ -1519,10 +1509,10 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       _connectedDeviceName = device.name;
       _resetDashboard();
     });
-    
+
     _log("[SafeCook Native BT]");
     _log("Connecting to HC-05");
-    
+
     try {
       await _disconnect();
       await _methodChannel.invokeMethod('connect', {'address': device.address});
@@ -1538,19 +1528,16 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       }
     }
   }
-  
+
   void _handleDisconnect() {
     if (mounted) {
       _sensorFreshnessTimer?.cancel();
       // Reset Safety Engine on disconnect
       SafeCookSafetyEngine().reset();
-      
-      // Phase 0 fix: if a cooking session is active when BT disconnects,
-      // end it so the agent state stays consistent.
-      if (_isCookingActive) {
-        _endCookingSession();
-        SafeCookAgent().reset();
-      }
+
+      // Keep an active cooking session alive while safety moves to standby.
+      // The user can continue navigation or end the session explicitly after
+      // reconnecting or acknowledging the unavailable sensor state.
       setState(() {
         _isConnecting = false;
         _connectedDevice = null;
@@ -1560,7 +1547,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       _notifySensorListeners();
     }
   }
-  
+
   Future<void> _disconnect() async {
     _log('Closing BLE GATT connection...');
     try {
@@ -1568,7 +1555,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
     } catch (e) {
       debugPrint("Error closing connection: $e");
     }
-    
+
     if (mounted) {
       setState(() {
         _isConnecting = false;
@@ -1579,34 +1566,21 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
       _notifySensorListeners();
     }
   }
-  
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOut,
-      );
-    }
-  }
-  
 
-  
   void _showSnackBar(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
-  
+
   @override
   void dispose() {
     SafetyVoiceController().unregisterHomeScreen(this);
     _safetySubscription?.cancel();
     _sensorFreshnessTimer?.cancel();
     _eventChannelSub?.cancel();
-    _scrollController.dispose();
     _sessionTimer?.cancel();
     _voiceService.stop();
     _speechService.stopListening();
@@ -1616,27 +1590,31 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   final WakeWordService _wakeWordService = WakeWordService();
 
   Future<void> _startWakeWordDetection() async {
+    _voiceConversation.deactivate();
     await _speechService.initialize();
     await _wakeWordService.startWakeWordDetection(
       onWakeDetected: () async {
+        _voiceConversation.activate();
         if (mounted) {
           setState(() {
             _assistantState = 'processing';
             _assistantReplyText = 'Hello! What would you like to do?';
           });
         }
-        
+
         _voiceService.setCompletionCallback(() {
           _voiceService.setCompletionCallback(null);
           _startVoiceCommandListening();
         });
-        
+
         await _voiceService.speak("Hello! What would you like to do?");
       },
     );
   }
 
   Future<void> _startVoiceCommandListening() async {
+    if (_voiceListenStarting || _speechService.isListening) return;
+    _voiceListenStarting = true;
     if (mounted) {
       setState(() {
         _assistantState = 'listening';
@@ -1660,18 +1638,23 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
           if (mounted) {
             setState(() {
               _assistantState = 'idle';
-              _assistantReplyText = "I'll wait here. Say Hello SafeCook when you need me.";
+              _assistantReplyText =
+                  "I'll wait here. Say Hello SafeCook when you need me.";
             });
           }
-          await _voiceService.speak("I'll wait here. Say Hello SafeCook when you need me.");
+          await _voiceService.speak(
+            "I'll wait here. Say Hello SafeCook when you need me.",
+          );
           _startWakeWordDetection();
         } else {
+          await _speechService.stopListening();
           _startVoiceCommandListening();
         }
       },
       onDoneListening: () async {
         final query = _userSpokenText.trim();
-        _userSpokenText = ''; // Clear immediately to prevent duplicate execution
+        _userSpokenText =
+            ''; // Clear immediately to prevent duplicate execution
 
         if (query.isEmpty) {
           final maxSilence = _isCookingActive ? 3 : 1;
@@ -1681,18 +1664,23 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
             if (mounted) {
               setState(() {
                 _assistantState = 'idle';
-                _assistantReplyText = "I'll wait here. Say Hello SafeCook when you need me.";
+                _assistantReplyText =
+                    "I'll wait here. Say Hello SafeCook when you need me.";
               });
             }
-            await _voiceService.speak("I'll wait here. Say Hello SafeCook when you need me.");
+            await _voiceService.speak(
+              "I'll wait here. Say Hello SafeCook when you need me.",
+            );
             _startWakeWordDetection();
           } else {
+            await _speechService.stopListening();
             _startVoiceCommandListening();
           }
           return;
         }
 
-        _consecutiveSilenceTurns = 0; // Reset silence turns on valid user speech
+        _consecutiveSilenceTurns =
+            0; // Reset silence turns on valid user speech
 
         if (mounted) {
           setState(() {
@@ -1701,10 +1689,12 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         }
 
         final eventId = DateTime.now().millisecondsSinceEpoch;
-        debugPrint('[SafeCook VOICE]\n'
-            'eventId=$eventId\n'
-            'recognized="$query"\n'
-            'processingStarted=true');
+        debugPrint(
+          '[SafeCook VOICE]\n'
+          'eventId=$eventId\n'
+          'recognized="$query"\n'
+          'processingStarted=true',
+        );
 
         final voiceContext = VoiceAssistantContext(
           gasValue: _gasValue,
@@ -1716,8 +1706,10 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
 
         final actions = VoiceAssistantActions(
           onNextStep: () async => const ToolResult.fail('Not in cooking mode'),
-          onPreviousStep: () async => const ToolResult.fail('Not in cooking mode'),
-          onRepeatStep: () async => const ToolResult.fail('Not in cooking mode'),
+          onPreviousStep: () async =>
+              const ToolResult.fail('Not in cooking mode'),
+          onRepeatStep: () async =>
+              const ToolResult.fail('Not in cooking mode'),
           onGoToStep: (_) async => const ToolResult.fail('Not in cooking mode'),
           onEndCooking: () async {
             _endCookingSession();
@@ -1726,6 +1718,7 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
           onStartCooking: (recipe) async {
             if (!mounted) return const ToolResult.fail('Widget not mounted');
             final selected = SafeCookAgent().selectedRecipe ?? recipe;
+            _voiceConversation.deactivate();
             _wakeWordService.stopWakeWordDetection();
             _speechService.stopListening();
             _startCookingSession();
@@ -1744,13 +1737,16 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
                 setState(() {});
               }
             });
-            return const ToolResult.ok('Navigation to cooking screen initiated');
+            return const ToolResult.ok(
+              'Navigation to cooking screen initiated',
+            );
           },
           onConnectBluetooth: connectBluetoothFromVoice,
           onDisconnectBluetooth: disconnectBluetoothFromVoice,
           onBluetoothStatus: bluetoothStatusResult,
         );
 
+        final exitConversation = _isVoiceExitPhrase(query);
         final reply = await _assistantService.processVoiceCommand(
           query,
           voiceContext,
@@ -1763,23 +1759,18 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
           });
         }
 
-        final csNow = SafeCookAgent().conversationState;
-        final isSelectingOrCooking = csNow == ConversationState.selectingRecipe ||
-                                     csNow == ConversationState.confirmingStart ||
-                                     csNow == ConversationState.confirmingEnd ||
-                                     csNow == ConversationState.awaitingReadyConfirm ||
-                                     csNow == ConversationState.cooking;
-        
+        if (exitConversation) _voiceConversation.deactivate();
+
         _voiceService.setCompletionCallback(() {
           _voiceService.setCompletionCallback(null);
-          if (SafeCookAgent().conversationState == ConversationState.idle) {
+          if (!_voiceConversation.shouldListenAfterTts()) {
             if (mounted) {
               setState(() {
                 _assistantState = 'idle';
               });
             }
             _startWakeWordDetection();
-          } else if (isSelectingOrCooking && mounted) {
+          } else if (_voiceConversation.shouldListenAfterTts() && mounted) {
             _startVoiceCommandListening();
           } else {
             if (mounted) {
@@ -1794,34 +1785,92 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         await _voiceService.speak(reply);
       },
     );
+    _voiceListenStarting = false;
+  }
+
+  bool _isVoiceExitPhrase(String text) {
+    final q = text.toLowerCase().trim();
+    return q == 'goodbye' ||
+        q == 'bye' ||
+        q == 'go to sleep' ||
+        q == 'stop listening' ||
+        q == 'end conversation' ||
+        q == 'cancel conversation';
   }
 
   Future<void> _startVoiceListening() async {
+    _voiceConversation.activate();
     await _wakeWordService.stopWakeWordDetection();
     await _startVoiceCommandListening();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = _connectedDevice != null;
-    
     return Scaffold(
+      backgroundColor: SafeCookColors.background,
       appBar: AppBar(
-        title: const Row(
+        titleSpacing: 16,
+        backgroundColor: SafeCookColors.background,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Row(
           children: [
-            Icon(Icons.security, color: Color(0xFF10B981)),
-            SizedBox(width: 8),
-            Text(
-              'SafeCook',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                letterSpacing: 0.5,
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: SafeCookColors.safe.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: SafeCookColors.safe.withValues(alpha: 0.3),
+                  width: 1,
+                ),
               ),
+              child: const Icon(
+                Icons.shield_rounded,
+                color: SafeCookColors.safe,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Text(
+                  'SafeCook',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontWeight: FontWeight.w900,
+                    fontSize: 19,
+                    letterSpacing: 0.2,
+                    color: SafeCookColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  'SMART COOKING SAFETY',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 9,
+                    letterSpacing: 0.8,
+                    color: SafeCookColors.primaryLight,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_awesome_motion),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const MemoryScreen()),
+              );
+            },
+            tooltip: 'Open SafeCook memory',
+          ),
           if (!_showPaired)
             IconButton(
               icon: Icon(_isScanning ? Icons.stop : Icons.search),
@@ -1846,560 +1895,445 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
           }
         },
         child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 32),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildAlertBanner(),
-  
-               // 0. Highly Accessible Conversational UI Card
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-                child: Semantics(
-                  button: true,
-                  label: 'Double tap anywhere to talk to SafeCook, or tap here to start voice assistant.',
-                  child: Card(
-                    color: const Color(0xFF1E293B),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(
-                        color: _assistantState == 'listening'
-                            ? Colors.redAccent
-                            : const Color(0xFF38BDF8),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: InkWell(
-                      onTap: () {
-                        if (_assistantState == 'listening') {
-                          _speechService.stopListening();
-                        } else {
-                          _startVoiceListening();
-                        }
-                      },
-                      borderRadius: BorderRadius.circular(20),
-                      child: Padding(
-                        padding: const EdgeInsets.all(20.0),
-                        child: Column(
-                          children: [
-                            const Icon(Icons.shield, color: Color(0xFF10B981), size: 48),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'SAFECOOK',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 28,
-                                color: Colors.white,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                            const Text(
-                              'Smart Cooking Safety Assistant',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Color(0xFF38BDF8),
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'Double tap screen or say "Hello SafeCook" to speak.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
-                            ),
-                            const SizedBox(height: 20),
-                            
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0F172A),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white10),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    _assistantState == 'listening'
-                                        ? Icons.mic
-                                        : _assistantState == 'processing'
-                                            ? Icons.query_stats
-                                            : Icons.mic_none,
-                                    color: _assistantState == 'listening'
-                                        ? Colors.redAccent
-                                        : _assistantState == 'processing'
-                                            ? const Color(0xFF38BDF8)
-                                            : Colors.white70,
-                                    size: 24,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    _assistantState == 'listening'
-                                        ? 'LISTENING...'
-                                        : _assistantState == 'processing'
-                                            ? 'UNDERSTANDING...'
-                                            : 'TAP TO TALK',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                      color: _assistantState == 'listening'
-                                          ? Colors.redAccent
-                                          : _assistantState == 'processing'
-                                              ? const Color(0xFF38BDF8)
-                                              : Colors.white70,
-                                      letterSpacing: 1,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            
-                            if (_userSpokenText.isNotEmpty) ...[
-                              const SizedBox(height: 16),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'YOU: ',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF38BDF8), fontSize: 14),
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      '"$_userSpokenText"',
-                                      style: const TextStyle(color: Colors.white, fontSize: 14, fontStyle: FontStyle.italic),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                            if (_assistantReplyText.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'SAFECOOK: ',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981), fontSize: 14),
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      _assistantReplyText,
-                                      style: const TextStyle(color: Colors.white70, fontSize: 14),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                            
-                            const SizedBox(height: 20),
-                            const Divider(color: Colors.white10, height: 1),
-                            const SizedBox(height: 20),
-                            
-                            Semantics(
-                              button: true,
-                              label: 'Start cooking, touch route list',
-                              child: ElevatedButton.icon(
-                                onPressed: () async {
-                                  final selectedRecipe = await Navigator.push<Recipe>(
-                                    context,
-                                    MaterialPageRoute(builder: (context) => const RecipeListScreen()),
-                                  );
-                                  
-                                  if (selectedRecipe != null && mounted) {
-                                    _startCookingSession();
-                                    if (!context.mounted) return;
-                                    await Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => CookingGuidanceScreen(
-                                          recipe: selectedRecipe,
-                                          homeState: this,
-                                        ),
-                                      ),
-                                    );
-                                    if (mounted) {
-                                      setState(() {});
-                                    }
-                                  }
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF10B981),
-                                  foregroundColor: Colors.white,
-                                  minimumSize: const Size(double.infinity, 54),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  elevation: 4,
-                                ),
-                                icon: const Icon(Icons.restaurant_menu, size: 22),
-                                label: const Text(
-                                  'START COOKING (TOUCH)',
-                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+              _buildWelcomeSection(),
+              _buildPrimaryCookingCard(),
+              _buildCookingSessionControl(),
+              _buildKitchenSafetyCard(),
+              _buildQuickActions(),
+              _buildRecentCookingSection(),
+              _buildSubordinatePreferences(),
+              _buildSubordinateSensorSettings(),
+              _buildDiagnosticsSection(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomeSection() {
+    final isConnected = _connectedDevice != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'Welcome, Chef',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: SafeCookColors.textPrimary,
+                    letterSpacing: -0.3,
                   ),
                 ),
+                SizedBox(height: 2),
+                Text(
+                  'Voice guidance & safety monitoring active',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontSize: 13,
+                    color: SafeCookColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: isConnected
+                  ? SafeCookColors.safeBg
+                  : SafeCookColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(SafeCookRadius.full),
+              border: Border.all(
+                color: isConnected
+                    ? SafeCookColors.safeBorder
+                    : SafeCookColors.border,
               ),
-  
-              // Bluetooth Settings Expandable Card
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
-                child: Card(
-                  color: const Color(0xFF1E293B),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Column(
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isConnected
+                      ? Icons.sensors_rounded
+                      : Icons.sensors_off_rounded,
+                  size: 13,
+                  color: isConnected
+                      ? SafeCookColors.safe
+                      : SafeCookColors.textSecondary,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  isConnected ? 'Sensor Linked' : 'Sensor Offline',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: isConnected
+                        ? SafeCookColors.safe
+                        : SafeCookColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrimaryCookingCard() {
+    final isListening = _assistantState == 'listening';
+    final isProcessing = _assistantState == 'processing';
+
+    final Color statusColor = isListening
+        ? SafeCookColors.danger
+        : isProcessing
+        ? SafeCookColors.primaryLight
+        : SafeCookColors.safe;
+
+    final String statusLabel = isListening
+        ? 'Listening… Speak now'
+        : isProcessing
+        ? 'Understanding command…'
+        : 'Say "Hello SafeCook" or tap to speak';
+
+    final String formatDuration = _formatDuration(_sessionDuration);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: SCCard(
+        borderRadius: SafeCookRadius.lg,
+        borderColor: isListening
+            ? SafeCookColors.dangerBorder
+            : isProcessing
+            ? SafeCookColors.primaryLight.withValues(alpha: 0.4)
+            : SafeCookColors.border,
+        padding: const EdgeInsets.all(18.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Voice status & interactive mic pill
+            Semantics(
+              button: true,
+              label:
+                  'Double tap anywhere to talk to SafeCook, or tap here to start voice assistant.',
+              child: InkWell(
+                onTap: () {
+                  if (_assistantState == 'listening') {
+                    _speechService.stopListening();
+                  } else {
+                    _startVoiceListening();
+                  }
+                },
+                borderRadius: BorderRadius.circular(SafeCookRadius.md),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isListening
+                        ? SafeCookColors.dangerBg
+                        : SafeCookColors.surfaceHighest,
+                    borderRadius: BorderRadius.circular(SafeCookRadius.md),
+                    border: Border.all(
+                      color: isListening
+                          ? SafeCookColors.dangerBorder
+                          : SafeCookColors.border,
+                    ),
+                  ),
+                  child: Row(
                     children: [
-                      ListTile(
-                        leading: const Icon(Icons.settings_bluetooth, color: Color(0xFF38BDF8)),
-                        title: const Text(
-                          'Sensor Connection Settings',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: statusColor.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
                         ),
-                        trailing: Icon(
-                          _showBluetoothSettings ? Icons.expand_less : Icons.expand_more,
-                          color: Colors.white54,
+                        child: Icon(
+                          isListening
+                              ? Icons.mic_rounded
+                              : isProcessing
+                              ? Icons.auto_fix_high_rounded
+                              : Icons.mic_none_rounded,
+                          color: statusColor,
+                          size: 20,
                         ),
-                        onTap: () {
-                          setState(() {
-                            _showBluetoothSettings = !_showBluetoothSettings;
-                          });
-                          if (_showBluetoothSettings) {
-                            _getBondedDevices();
-                          }
-                        },
                       ),
-                      if (_showBluetoothSettings) ...[
-                        const Divider(color: Colors.white10, height: 1),
-                        // 1. Adapter & Connection Status
-                        Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      'Bluetooth Adapter:',
-                                      style: TextStyle(fontSize: 14, color: Colors.white70),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: _adapterState == ClassicAdapterState.on ? _greenBg : _redBg,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: _adapterState == ClassicAdapterState.on ? _greenBorder : _redBorder,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      _adapterState.name.toUpperCase(),
-                                      style: TextStyle(
-                                        color: _adapterState == ClassicAdapterState.on ? _greenAccent : _redAccent,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      'Connection Status:',
-                                      style: TextStyle(fontSize: 14, color: Colors.white70),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: (_connectionStatus == 'Connected' ||
-                                              _connectionStatus == 'GATT Connected' ||
-                                              _connectionStatus == 'Receiving Data')
-                                          ? _greenBg
-                                          : (_connectionStatus.startsWith('Connecting') ||
-                                                  _connectionStatus == 'Services Discovered' ||
-                                                  _connectionStatus == 'Notifications Enabled')
-                                              ? _amberBg
-                                              : _redBg,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: (_connectionStatus == 'Connected' ||
-                                                _connectionStatus == 'GATT Connected' ||
-                                                _connectionStatus == 'Receiving Data')
-                                            ? _greenBorder
-                                            : _connectionStatus.startsWith('Connecting') ||
-                                                _connectionStatus == 'Services Discovered' ||
-                                                _connectionStatus == 'Notifications Enabled'
-                                                ? _amberBorder
-                                                : _redBorder,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      _connectionStatus,
-                                      style: TextStyle(
-                                        color: _connectionStatus == 'Connected' ||
-                                                _connectionStatus == 'GATT Connected' ||
-                                                _connectionStatus == 'Receiving Data'
-                                            ? _greenAccent
-                                            : _connectionStatus.startsWith('Connecting') ||
-                                                _connectionStatus == 'Services Discovered' ||
-                                                _connectionStatus == 'Notifications Enabled'
-                                                ? _amberAccent
-                                                : _redAccent,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (isConnected) ...[
-                                const SizedBox(height: 16),
-                                const Divider(color: Colors.white10, height: 1),
-                                const SizedBox(height: 12),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            _connectedDeviceName ?? 'HC-05',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 16,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          Text(
-                                            _connectedDeviceAddress ?? '',
-                                            style: const TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 12,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    ElevatedButton.icon(
-                                      onPressed: _disconnect,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.red.shade900,
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
-                                        ),
-                                      ),
-                                      icon: const Icon(Icons.link_off, size: 16),
-                                      label: const Text('Disconnect'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        const Divider(color: Colors.white10, height: 1),
-                        // 2. Custom Tabs
-                        Row(
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _showPaired = true;
-                                  });
-                                  _getBondedDevices();
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      bottom: BorderSide(
-                                        color: _showPaired ? const Color(0xFF38BDF8) : Colors.transparent,
-                                        width: 2,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      'PAIRED (${_bondedDevices.length})',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: _showPaired ? FontWeight.bold : FontWeight.normal,
-                                        color: _showPaired ? const Color(0xFF38BDF8) : Colors.white60,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                            Text(
+                              isListening
+                                  ? 'LISTENING'
+                                  : isProcessing
+                                  ? 'PROCESSING'
+                                  : 'VOICE ASSISTANT',
+                              style: TextStyle(
+                                fontFamily: 'Nunito',
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                                color: statusColor,
                               ),
                             ),
-                            Expanded(
-                              child: InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _showPaired = false;
-                                  });
-                                  _startScan();
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      bottom: BorderSide(
-                                        color: !_showPaired ? const Color(0xFF38BDF8) : Colors.transparent,
-                                        width: 2,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      'SCANNED (${_discoveredDevices.length})',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: !_showPaired ? FontWeight.bold : FontWeight.normal,
-                                        color: !_showPaired ? const Color(0xFF38BDF8) : Colors.white60,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                            const SizedBox(height: 2),
+                            Text(
+                              statusLabel,
+                              style: const TextStyle(
+                                fontFamily: 'Nunito',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: SafeCookColors.textPrimary,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
-                        const Divider(color: Colors.white10, height: 1),
-                        // 3. Device List
-                        _showPaired ? _buildPairedList() : _buildScannedList(),
-                      ],
+                      ),
+                      if (isListening || isProcessing)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: statusColor,
+                            shape: BoxShape.circle,
+                          ),
+                        )
+                      else
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: SafeCookColors.textSecondary,
+                          size: 18,
+                        ),
                     ],
                   ),
                 ),
               ),
-              
-              _buildUserPreferences(),
-              
-              _buildCookingSessionControl(),
-              
-              // 4. Sensor Dashboard
-              _buildDashboard(),
-              
-              _buildLiveTrends(),
-              
-              _buildSafetyHistory(),
+            ),
+
+            if (_userSpokenText.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              ConversationLine(speaker: 'YOU', text: _userSpokenText),
             ],
-          ),
-        ),
-      ),
-    );
-  }
+            if (_assistantReplyText.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ConversationLine(speaker: 'SAFECOOK', text: _assistantReplyText),
+            ],
 
-  Widget _buildUserPreferences() {
-    final lastCookedId = PreferenceService().getLastCookedRecipeId();
-    final lastCookedRecipe = lastCookedId != null
-        ? kPredefinedRecipes.firstWhere((r) => r.id == lastCookedId, orElse: () => kPredefinedRecipes.first)
-        : null;
-    final isVeg = PreferenceService().isVegetarian();
+            const SizedBox(height: 16),
+            const Divider(color: SafeCookColors.divider, height: 1),
+            const SizedBox(height: 16),
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
-      child: Card(
-        color: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.person_outline, color: Color(0xFF38BDF8), size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'User Preferences',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            // Active session timer if cooking is currently active
+            if (_isCookingActive) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: SafeCookColors.primaryContainer,
+                  borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                  border: Border.all(
+                    color: SafeCookColors.primaryLight.withValues(alpha: 0.3),
                   ),
-                ],
-              ),
-              const Divider(color: Colors.white10, height: 16),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Vegetarian Mode Only', style: TextStyle(fontSize: 13, color: Colors.white70)),
-                value: isVeg,
-                activeThumbColor: const Color(0xFF10B981),
-                onChanged: (val) async {
-                  await PreferenceService().setVegetarian(val);
-                  setState(() {});
-                },
-              ),
-              if (lastCookedRecipe != null) ...[
-                const SizedBox(height: 8),
-                Row(
+                ),
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('LAST COOKED RECIPE', style: TextStyle(fontSize: 9, color: Colors.white30, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 2),
-                          Text(lastCookedRecipe.name, style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                        ],
-                      ),
-                    ),
-                    ElevatedButton(
-                      onPressed: () async {
-                        _startCookingSession();
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => CookingGuidanceScreen(
-                              recipe: lastCookedRecipe,
-                              homeState: this,
-                            ),
-                          ),
-                        );
-                        if (mounted) {
-                          setState(() {});
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0EA5E9),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                    Row(
+                      children: const [
+                        Icon(
+                          Icons.soup_kitchen_rounded,
+                          color: SafeCookColors.primaryLight,
+                          size: 18,
                         ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Cooking in progress',
+                          style: TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: SafeCookColors.primaryLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      formatDuration,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: SafeCookColors.textPrimary,
                       ),
-                      child: const Text('COOK AGAIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
-              ],
+              ),
             ],
-          ),
+
+            // Primary Start Cooking Button
+            Semantics(
+              button: true,
+              label: 'Start cooking, touch route list',
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  final selectedRecipe = await Navigator.push<Recipe>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RecipeListScreen(),
+                    ),
+                  );
+
+                  if (selectedRecipe != null && mounted) {
+                    _startCookingSession();
+                    if (!context.mounted) return;
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CookingGuidanceScreen(
+                          recipe: selectedRecipe,
+                          homeState: this,
+                        ),
+                      ),
+                    );
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: SafeCookColors.safe,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 52),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                  ),
+                  elevation: 2,
+                ),
+                icon: const Icon(Icons.restaurant_menu_rounded, size: 22),
+                label: Text(
+                  _isCookingActive ? 'CHOOSE ANOTHER RECIPE' : 'START COOKING',
+                  style: const TextStyle(
+                    fontFamily: 'Nunito',
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ),
+
+            if (_isCookingActive) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _endCookingSession,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: SafeCookColors.danger,
+                  side: const BorderSide(color: SafeCookColors.dangerBorder),
+                  minimumSize: const Size(double.infinity, 44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                  ),
+                ),
+                icon: const Icon(Icons.stop_circle_outlined, size: 20),
+                label: const Text(
+                  'END ACTIVE SESSION',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildDashboard() {
+  Widget _buildSessionSummaryCard() {
+    if (!_showSessionSummary) return const SizedBox.shrink();
+    final formatDuration = _formatDuration(_sessionDuration);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: SCCard(
+        borderRadius: SafeCookRadius.md,
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(
+                  Icons.assessment_rounded,
+                  color: SafeCookColors.primaryLight,
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'COMPLETED SESSION SUMMARY',
+                  style: SafeCookTextStyles.label,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Divider(color: SafeCookColors.divider, height: 1),
+            const SizedBox(height: 10),
+            _buildSummaryItem('Duration', formatDuration),
+            _buildSummaryItem(
+              'Maximum Gas',
+              _sessionMaxGas != null ? '$_sessionMaxGas' : 'N/A',
+            ),
+            _buildSummaryItem(
+              'Minimum Distance',
+              _sessionMinDistance != null
+                  ? '${_sessionMinDistance!.toStringAsFixed(2)} cm'
+                  : 'N/A',
+            ),
+            _buildSummaryItem(
+              'Total Alerts',
+              '${_sessionCautionCount + _sessionGasAlertCount + _sessionDistanceAlertCount}',
+            ),
+            _buildSummaryItem('Critical Events', '$_sessionCriticalCount'),
+            _buildSummaryItem(
+              'Final Safety State',
+              _sessionFinalSafetyState,
+              color: _getHistoryStateColor(_sessionFinalSafetyState),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKitchenSafetyCard() {
     final status = _getCombinedStatus();
+    final isConnected = _connectedDevice != null;
+
     String explanation;
     switch (status) {
       case 'SAFE':
@@ -2409,194 +2343,1131 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         explanation = "Please pay attention to the cooking area.";
         break;
       case 'GAS ALERT':
-        explanation = "Gas level is high. Check the cooking area.";
+        explanation = "Gas level is high. Check cooking area.";
         break;
       case 'DISTANCE ALERT':
-        explanation = "The vessel is too close.";
+        explanation = "Vessel or chef proximity warning.";
         break;
       case 'CRITICAL':
-        explanation = "Immediate attention required.";
+        explanation = "Immediate hazard detected! Turn off heat.";
         break;
       default:
-        explanation = "Sensor standby.";
+        explanation = "Sensor standby — monitoring offline.";
     }
 
+    final gasPercent = _gasValue != null
+        ? '${GasCalibration.toPercent(_gasValue!).toStringAsFixed(0)}%'
+        : '--';
+    final distanceDisplay = _distanceValue != null
+        ? '$_distanceValue cm'
+        : '--';
+    final sensorDisplay = isConnected
+        ? (_connectedDeviceName ?? 'HC-05')
+        : 'Offline';
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: SCCard(
+        borderRadius: SafeCookRadius.lg,
+        padding: const EdgeInsets.all(18.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header Row: Icon + State + Pill
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _getCombinedStatusBgColor(),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _getCombinedStatusBorderColor()),
+                  ),
+                  child: Icon(
+                    _getCombinedStatusIcon(),
+                    color: _getCombinedStatusColor(),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'KITCHEN SAFETY STATUS',
+                        style: SafeCookTextStyles.label,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        status,
+                        style: TextStyle(
+                          fontFamily: 'Nunito',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: _getCombinedStatusColor(),
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      Text(
+                        explanation,
+                        style: const TextStyle(
+                          fontFamily: 'Nunito',
+                          fontSize: 12,
+                          color: SafeCookColors.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                SafetyStatusBadge(status: status),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+            const Divider(color: SafeCookColors.divider, height: 1),
+            const SizedBox(height: 14),
+
+            // 3-Column Metrics Row
+            Row(
+              children: [
+                // Gas Level (No raw ADC value exposed)
+                Expanded(
+                  child: _buildMetricTile(
+                    label: 'GAS LEVEL',
+                    value: gasPercent,
+                    statusText: _gasStatus,
+                    statusColor: _gasStatusColor,
+                    icon: Icons.gas_meter_rounded,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Chef Distance
+                Expanded(
+                  child: _buildMetricTile(
+                    label: 'DISTANCE',
+                    value: distanceDisplay,
+                    statusText: _distanceStatus,
+                    statusColor: _distanceStatusColor,
+                    icon: Icons.accessibility_new_rounded,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Bluetooth / Sensor Link
+                Expanded(
+                  child: _buildMetricTile(
+                    label: 'SENSOR LINK',
+                    value: sensorDisplay,
+                    statusText: isConnected ? 'Connected' : 'Offline',
+                    statusColor: isConnected
+                        ? SafeCookColors.safe
+                        : SafeCookColors.textSecondary,
+                    icon: Icons.bluetooth_rounded,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetricTile({
+    required String label,
+    required String value,
+    required String statusText,
+    required Color statusColor,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      decoration: BoxDecoration(
+        color: SafeCookColors.surfaceHighest,
+        borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+        border: Border.all(color: SafeCookColors.border.withValues(alpha: 0.6)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'SAFETY MONITORING DASHBOARD',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: Colors.white70,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: const Color(0xFF1E293B),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _getCombinedStatusBgColor(),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: _getCombinedStatusBorderColor()),
-                    ),
-                    child: Icon(
-                      _getCombinedStatusIcon(),
-                      color: _getCombinedStatusColor(),
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'SAFECOOK SAFETY STATUS',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white54,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          status,
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: _getCombinedStatusColor(),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          explanation,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontFamily: 'Nunito',
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                  color: SafeCookColors.textSecondary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
+              Icon(icon, size: 14, color: SafeCookColors.textSecondary),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              fontFamily: 'Nunito',
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: SafeCookColors.textPrimary,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
           Row(
             children: [
-              // Gas Card
-              Expanded(
-                child: Card(
-                  color: const Color(0xFF1E293B),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Gas Level', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                            Icon(Icons.gas_meter_outlined, color: Colors.white30, size: 16),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _gasValue != null ? '$_gasValue' : '--',
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: _gasStatusColor,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _gasStatus,
-                              style: TextStyle(color: _gasStatusColor, fontSize: 12, fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 8),
-              // Distance Card
-              Expanded(
-                child: Card(
-                  color: const Color(0xFF1E293B),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Distance', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                            Icon(Icons.settings_input_antenna_outlined, color: Colors.white30, size: 16),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _distanceValue ?? '--',
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: _distanceStatusColor,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                             const SizedBox(width: 6),
-                             Flexible(
-                               child: Text(
-                                 _distanceStatus,
-                                 style: TextStyle(color: _distanceStatusColor, fontSize: 12, fontWeight: FontWeight.bold),
-                                 maxLines: 1,
-                                 overflow: TextOverflow.ellipsis,
-                               ),
-                             ),
-                          ],
-                        ),
-                      ],
-                    ),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: statusColor,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SCSection(
+            label: 'Quick Actions',
+            padding: EdgeInsets.only(bottom: 8),
+          ),
+          Row(
+            children: [
+              // Cook action
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.outdoor_grill_rounded,
+                  iconColor: SafeCookColors.safe,
+                  iconBg: SafeCookColors.safeBg,
+                  title: 'Cook',
+                  subtitle: 'Start session',
+                  onTap: () async {
+                    final selectedRecipe = await Navigator.push<Recipe>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const RecipeListScreen(),
+                      ),
+                    );
+                    if (selectedRecipe != null && mounted) {
+                      _startCookingSession();
+                      if (!context.mounted) return;
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CookingGuidanceScreen(
+                            recipe: selectedRecipe,
+                            homeState: this,
+                          ),
+                        ),
+                      );
+                      if (mounted) setState(() {});
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Recipes action
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.menu_book_rounded,
+                  iconColor: SafeCookColors.primaryLight,
+                  iconBg: SafeCookColors.primaryContainer,
+                  title: 'Recipes',
+                  subtitle: 'Explore dishes',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const RecipeListScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Memory action
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.psychology_rounded,
+                  iconColor: const Color(0xFFA78BFA),
+                  iconBg: const Color(0x26A78BFA),
+                  title: 'Memory',
+                  subtitle: 'Safety notes',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const MemoryScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBg,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return SCCard(
+      borderRadius: SafeCookRadius.md,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            style: const TextStyle(
+              fontFamily: 'Nunito',
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: SafeCookColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontFamily: 'Nunito',
+              fontSize: 11,
+              color: SafeCookColors.textSecondary,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentCookingSection() {
+    final lastCookedId = PreferenceService().getLastCookedRecipeId();
+    final allRecipes = [
+      ...kPredefinedRecipes,
+      ...PreferenceService().getDynamicRecipes(),
+    ];
+    Recipe? lastCookedRecipe;
+    if (lastCookedId != null) {
+      try {
+        lastCookedRecipe = allRecipes.firstWhere((r) => r.id == lastCookedId);
+      } catch (_) {
+        lastCookedRecipe = null;
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SCSection(
+            label: 'Recent Cooking',
+            padding: EdgeInsets.only(bottom: 8),
+          ),
+          if (lastCookedRecipe != null)
+            SCCard(
+              borderRadius: SafeCookRadius.md,
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: SafeCookColors.primaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.restaurant_rounded,
+                      color: SafeCookColors.primaryLight,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'CONTINUE COOKING',
+                          style: TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.8,
+                            color: SafeCookColors.primaryLight,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          lastCookedRecipe.name,
+                          style: const TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: SafeCookColors.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${lastCookedRecipe.cookingTime} mins • ${lastCookedRecipe.difficulty} • ${lastCookedRecipe.category}',
+                          style: const TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 12,
+                            color: SafeCookColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      _startCookingSession();
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CookingGuidanceScreen(
+                            recipe: lastCookedRecipe!,
+                            homeState: this,
+                          ),
+                        ),
+                      );
+                      if (mounted) setState(() {});
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: SafeCookColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      'COOK AGAIN',
+                      style: TextStyle(
+                        fontFamily: 'Nunito',
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            SCCard(
+              borderRadius: SafeCookRadius.md,
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: SafeCookColors.surfaceHighest,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.history_rounded,
+                      color: SafeCookColors.textMuted,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'No recent cooking sessions',
+                          style: TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: SafeCookColors.textSecondary,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Start your first recipe with voice guidance.',
+                          style: TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 11,
+                            color: SafeCookColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RecipeListScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Browse',
+                      style: TextStyle(
+                        fontFamily: 'Nunito',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: SafeCookColors.primaryLight,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubordinatePreferences() {
+    final isVeg = PreferenceService().isVegetarian();
+    final preferredCuisine = PreferenceService().getPreferredCuisine();
+    final preferredServings = PreferenceService().getPreferredServings();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: SCCard(
+        borderRadius: SafeCookRadius.md,
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _showPreferences = !_showPreferences;
+                });
+              },
+              borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: SafeCookColors.surfaceHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.tune_rounded,
+                      color: SafeCookColors.primaryLight,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'USER PREFERENCES',
+                          style: SafeCookTextStyles.label,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${isVeg ? 'Vegetarian' : 'All diets'} • $preferredCuisine • $preferredServings servings',
+                          style: const TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: SafeCookColors.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _showPreferences
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: SafeCookColors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+            if (_showPreferences) ...[
+              const SizedBox(height: 12),
+              const Divider(color: SafeCookColors.divider, height: 1),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Vegetarian Mode Only',
+                  style: TextStyle(
+                    fontFamily: 'Nunito',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: SafeCookColors.textPrimary,
+                  ),
+                ),
+                value: isVeg,
+                activeThumbColor: SafeCookColors.safe,
+                onChanged: (val) async {
+                  await PreferenceService().setVegetarian(val);
+                  setState(() {});
+                },
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: preferredCuisine,
+                decoration: InputDecoration(
+                  labelText: 'Preferred cuisine',
+                  labelStyle: const TextStyle(
+                    fontFamily: 'Nunito',
+                    color: SafeCookColors.textSecondary,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                    borderSide: const BorderSide(color: SafeCookColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                    borderSide: const BorderSide(color: SafeCookColors.border),
+                  ),
+                ),
+                dropdownColor: SafeCookColors.surfaceElevated,
+                items:
+                    const [
+                          'Any',
+                          'Indian',
+                          'Mediterranean',
+                          'Italian',
+                          'East Asian',
+                        ]
+                        .map(
+                          (cuisine) => DropdownMenuItem(
+                            value: cuisine,
+                            child: Text(
+                              cuisine,
+                              style: const TextStyle(fontFamily: 'Nunito'),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                onChanged: (cuisine) async {
+                  if (cuisine == null) return;
+                  await PreferenceService().setPreferredCuisine(cuisine);
+                  if (mounted) setState(() {});
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: preferredServings,
+                decoration: InputDecoration(
+                  labelText: 'Preferred servings',
+                  labelStyle: const TextStyle(
+                    fontFamily: 'Nunito',
+                    color: SafeCookColors.textSecondary,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                    borderSide: const BorderSide(color: SafeCookColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+                    borderSide: const BorderSide(color: SafeCookColors.border),
+                  ),
+                ),
+                dropdownColor: SafeCookColors.surfaceElevated,
+                items: [1, 2, 3, 4, 5, 6, 8, 10, 12]
+                    .map(
+                      (servings) => DropdownMenuItem(
+                        value: servings,
+                        child: Text(
+                          '$servings',
+                          style: const TextStyle(fontFamily: 'Nunito'),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (servings) async {
+                  if (servings == null) return;
+                  await PreferenceService().setPreferredServings(servings);
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubordinateSensorSettings() {
+    final isConnected = _connectedDevice != null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: SCCard(
+        borderRadius: SafeCookRadius.md,
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _showBluetoothSettings = !_showBluetoothSettings;
+                });
+                if (_showBluetoothSettings) {
+                  _getBondedDevices();
+                }
+              },
+              borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isConnected
+                          ? SafeCookColors.safeBg
+                          : SafeCookColors.surfaceHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      isConnected
+                          ? Icons.bluetooth_connected_rounded
+                          : Icons.settings_bluetooth_rounded,
+                      color: isConnected
+                          ? SafeCookColors.safe
+                          : SafeCookColors.primaryLight,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'SENSOR CONNECTION',
+                          style: SafeCookTextStyles.label,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isConnected
+                              ? '${_connectedDeviceName ?? 'HC-05'} (${_connectedDeviceAddress ?? 'Connected'})'
+                              : 'Adapter: ${_adapterState.name.toUpperCase()} • Disconnected',
+                          style: const TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: SafeCookColors.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _showBluetoothSettings
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: SafeCookColors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+            if (_showBluetoothSettings) ...[
+              const SizedBox(height: 12),
+              const Divider(color: SafeCookColors.divider, height: 1),
+              const SizedBox(height: 12),
+              // Status indicators
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Bluetooth Adapter:',
+                    style: TextStyle(
+                      fontFamily: 'Nunito',
+                      fontSize: 13,
+                      color: SafeCookColors.textSecondary,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _adapterState == ClassicAdapterState.on
+                          ? SafeCookColors.safeBg
+                          : SafeCookColors.dangerBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _adapterState == ClassicAdapterState.on
+                            ? SafeCookColors.safeBorder
+                            : SafeCookColors.dangerBorder,
+                      ),
+                    ),
+                    child: Text(
+                      _adapterState.name.toUpperCase(),
+                      style: TextStyle(
+                        fontFamily: 'Nunito',
+                        color: _adapterState == ClassicAdapterState.on
+                            ? SafeCookColors.safe
+                            : SafeCookColors.danger,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Connection Status:',
+                    style: TextStyle(
+                      fontFamily: 'Nunito',
+                      fontSize: 13,
+                      color: SafeCookColors.textSecondary,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          (_connectionStatus == 'Connected' ||
+                              _connectionStatus == 'GATT Connected' ||
+                              _connectionStatus == 'Receiving Data')
+                          ? SafeCookColors.safeBg
+                          : (_connectionStatus.startsWith('Connecting') ||
+                                _connectionStatus == 'Services Discovered' ||
+                                _connectionStatus == 'Notifications Enabled')
+                          ? SafeCookColors.cautionBg
+                          : SafeCookColors.dangerBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color:
+                            (_connectionStatus == 'Connected' ||
+                                _connectionStatus == 'GATT Connected' ||
+                                _connectionStatus == 'Receiving Data')
+                            ? SafeCookColors.safeBorder
+                            : (_connectionStatus.startsWith('Connecting') ||
+                                  _connectionStatus == 'Services Discovered' ||
+                                  _connectionStatus == 'Notifications Enabled')
+                            ? SafeCookColors.cautionBorder
+                            : SafeCookColors.dangerBorder,
+                      ),
+                    ),
+                    child: Text(
+                      _connectionStatus,
+                      style: TextStyle(
+                        fontFamily: 'Nunito',
+                        color:
+                            (_connectionStatus == 'Connected' ||
+                                _connectionStatus == 'GATT Connected' ||
+                                _connectionStatus == 'Receiving Data')
+                            ? SafeCookColors.safe
+                            : (_connectionStatus.startsWith('Connecting') ||
+                                  _connectionStatus == 'Services Discovered' ||
+                                  _connectionStatus == 'Notifications Enabled')
+                            ? SafeCookColors.caution
+                            : SafeCookColors.danger,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (isConnected) ...[
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _connectedDeviceName ?? 'HC-05',
+                            style: const TextStyle(
+                              fontFamily: 'Nunito',
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              color: SafeCookColors.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            _connectedDeviceAddress ?? '',
+                            style: const TextStyle(
+                              fontFamily: 'Nunito',
+                              color: SafeCookColors.textSecondary,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: _disconnect,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: SafeCookColors.danger,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: const Icon(Icons.link_off_rounded, size: 15),
+                      label: const Text(
+                        'Disconnect',
+                        style: TextStyle(
+                          fontFamily: 'Nunito',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
+              const Divider(color: SafeCookColors.divider, height: 1),
+              // Tabs for Paired and Scanned
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () {
+                        setState(() {
+                          _showPaired = true;
+                        });
+                        _getBondedDevices();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: _showPaired
+                                  ? SafeCookColors.primaryLight
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            'PAIRED (${_bondedDevices.length})',
+                            style: TextStyle(
+                              fontFamily: 'Nunito',
+                              fontSize: 12,
+                              fontWeight: _showPaired
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: _showPaired
+                                  ? SafeCookColors.primaryLight
+                                  : SafeCookColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () {
+                        setState(() {
+                          _showPaired = false;
+                        });
+                        _startScan();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: !_showPaired
+                                  ? SafeCookColors.primaryLight
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            'SCANNED (${_discoveredDevices.length})',
+                            style: TextStyle(
+                              fontFamily: 'Nunito',
+                              fontSize: 12,
+                              fontWeight: !_showPaired
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: !_showPaired
+                                  ? SafeCookColors.primaryLight
+                                  : SafeCookColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(color: SafeCookColors.divider, height: 1),
+              _showPaired ? _buildPairedList() : _buildScannedList(),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDiagnosticsSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: SCCard(
+        borderRadius: SafeCookRadius.md,
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _showDiagnostics = !_showDiagnostics;
+                });
+              },
+              borderRadius: BorderRadius.circular(SafeCookRadius.sm),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: SafeCookColors.surfaceHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.analytics_rounded,
+                      color: SafeCookColors.primaryLight,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'SENSOR TELEMETRY & LOGS',
+                          style: SafeCookTextStyles.label,
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Live trends, real-time charts & event history',
+                          style: TextStyle(
+                            fontFamily: 'Nunito',
+                            fontSize: 12,
+                            color: SafeCookColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _showDiagnostics
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: SafeCookColors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+            if (_showDiagnostics) ...[
+              const SizedBox(height: 12),
+              const Divider(color: SafeCookColors.divider, height: 1),
+              _buildLiveTrends(),
+              _buildSafetyHistory(),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -2609,11 +3480,19 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.bluetooth_disabled, size: 48, color: Colors.white24),
+              const Icon(
+                Icons.bluetooth_disabled,
+                size: 48,
+                color: Colors.white24,
+              ),
               const SizedBox(height: 12),
               const Text(
                 'No paired devices found',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white70),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white70,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -2656,11 +3535,19 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.bluetooth_searching, size: 48, color: Colors.white24),
+            const Icon(
+              Icons.bluetooth_searching,
+              size: 48,
+              color: Colors.white24,
+            ),
             const SizedBox(height: 12),
             const Text(
               'BLE Mode',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white70),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white70,
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -2675,9 +3562,12 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
   }
 
   Widget _buildDeviceItem(BluetoothDevice device) {
-    final isConnecting = _connectionStatus == 'Connecting...' && _connectedDeviceAddress == device.address;
-    final isConnected = _connectedDevice != null && _connectedDeviceAddress == device.address;
-    
+    final isConnecting =
+        _connectionStatus == 'Connecting...' &&
+        _connectedDeviceAddress == device.address;
+    final isConnected =
+        _connectedDevice != null && _connectedDeviceAddress == device.address;
+
     return Card(
       color: const Color(0xFF1E293B),
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -2711,7 +3601,11 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
               ),
               child: const Text(
                 'PAIRED',
-                style: TextStyle(fontSize: 9, color: Colors.white70, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -2719,28 +3613,34 @@ class BluetoothTestPageState extends State<BluetoothTestPage> implements SafetyV
         trailing: isConnected
             ? const Icon(Icons.check_circle, color: _greenAccent)
             : isConnecting
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF38BDF8)),
-                  )
-                : ElevatedButton(
-                    onPressed: _isConnecting ? null : () => _connectToDevice(device),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0EA5E9),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: const Text('Connect', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF38BDF8),
+                ),
+              )
+            : ElevatedButton(
+                onPressed: _isConnecting
+                    ? null
+                    : () => _connectToDevice(device),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0EA5E9),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
                   ),
+                ),
+                child: const Text(
+                  'Connect',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
       ),
     );
   }
-
-
 }
 
 class SLocationSizeBox extends StatelessWidget {

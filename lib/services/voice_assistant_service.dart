@@ -6,6 +6,7 @@ import '../agent/safecook_agent.dart';
 import '../agent/safecook_context.dart';
 import '../agent/safecook_tools.dart';
 import 'web_search_service.dart';
+import 'preference_service.dart';
 
 // ---------------------------------------------------------------------------
 // Gas calibration layer — converts raw ADC to a 0-100% percentage.
@@ -153,7 +154,11 @@ class VoiceAssistantService {
     String? rawText,
     String? category,
   }) {
-    return kPredefinedRecipes.where((r) {
+    final allRecipes = <Recipe>[
+      ...kPredefinedRecipes,
+      ...PreferenceService().getDynamicRecipes(),
+    ];
+    return allRecipes.where((r) {
       final nameLower = r.name.toLowerCase();
       final descLower = r.description.toLowerCase();
       final catLower = r.category.toLowerCase();
