@@ -42,7 +42,7 @@ pipeline {
 
         stage('Build Android APK') {
             steps {
-                bat 'flutter build apk --debug'
+                bat 'flutter build apk --debug -v'
             }
         }
     }
