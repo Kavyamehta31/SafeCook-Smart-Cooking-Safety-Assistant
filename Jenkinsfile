@@ -17,13 +17,23 @@ pipeline {
                 bat 'java -version'
                 bat 'git --version'
                 bat 'flutter --version'
+                bat 'node --version'
+                bat 'npm --version'
                 bat 'flutter doctor'
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Install Flutter Dependencies') {
             steps {
                 bat 'flutter pub get'
+            }
+        }
+
+        stage('Install Backend Dependencies') {
+            steps {
+                dir('safecook-search-backend') {
+                    bat 'npm ci'
+                }
             }
         }
 
@@ -33,64 +43,85 @@ pipeline {
             }
         }
 
-        stage('Functional Testing') {
+        stage('Flutter Functional Testing') {
             steps {
                 script {
-                    int testResult = bat(
+                    int result = bat(
                         returnStatus: true,
                         script: 'flutter test --reporter expanded > functional-test-report.txt 2>&1'
                     )
 
-                    if (testResult != 0) {
+                    if (result != 0) {
                         bat 'type functional-test-report.txt'
-                        error('Functional tests failed. Check functional-test-report.txt.')
+                        error('Flutter functional tests failed.')
                     }
 
-                    echo 'Functional tests passed.'
+                    echo 'Flutter functional tests passed.'
+                }
+            }
+        }
+
+        stage('Backend Functional Testing') {
+            steps {
+                dir('safecook-search-backend') {
+                    script {
+                        int result = bat(
+                            returnStatus: true,
+                            script: 'npm test -- --run > backend-test-report.txt 2>&1'
+                        )
+
+                        if (result != 0) {
+                            bat 'type backend-test-report.txt'
+                            error('Backend functional tests failed.')
+                        }
+
+                        echo 'Backend functional tests passed.'
+                    }
                 }
             }
         }
 
         stage('Non-Functional Testing') {
             steps {
-                script {
-                    def startTime = System.currentTimeMillis()
+                dir('safecook-search-backend') {
+                    script {
+                        def startTime = System.currentTimeMillis()
 
-                    int testResult = bat(
-                        returnStatus: true,
-                        script: 'flutter test --reporter expanded > reliability-test-output.txt 2>&1'
-                    )
+                        int result = bat(
+                            returnStatus: true,
+                            script: 'npm test -- --run -t "Non-Functional Checks" > nfr-test-output.txt 2>&1'
+                        )
 
-                    def endTime = System.currentTimeMillis()
-                    def durationSeconds = (endTime - startTime) / 1000.0
+                        def endTime = System.currentTimeMillis()
+                        def duration = (endTime - startTime) / 1000.0
 
-                    def report = """SafeCook Non-Functional Test Report
+                        def report = """SafeCook Non-Functional Test Report
 ===================================
-Test type: Repeatability / reliability check
+Test category: Backend response time and repeatability
 Start time: ${new Date(startTime)}
 End time: ${new Date(endTime)}
-Execution duration: ${durationSeconds} seconds
-Test command exit code: ${testResult}
-Reliability test result: ${testResult == 0 ? 'PASSED' : 'FAILED'}
+NFR test suite duration: ${duration} seconds
+NFR test command exit code: ${result}
+NFR test result: ${result == 0 ? 'PASSED' : 'FAILED'}
 
-Note: This check repeats the Flutter automated test suite.
-It does not measure real-device load, memory usage, or backend response time.
-Detailed output: reliability-test-output.txt
+The test measures mocked local worker response time and repeated invalid-request handling.
+It does not measure live Tavily latency, production load, or mobile-device memory usage.
+
+Detailed output: safecook-search-backend/nfr-test-output.txt
 """
 
-                    writeFile(
-                        file: 'non-functional-report.txt',
-                        text: report
-                    )
+                        writeFile(
+                            file: 'non-functional-report.txt',
+                            text: report
+                        )
 
-                    echo "Repeated test execution duration: ${durationSeconds} seconds"
+                        if (result != 0) {
+                            bat 'type nfr-test-output.txt'
+                            error('Backend NFR tests failed.')
+                        }
 
-                    if (testResult != 0) {
-                        bat 'type reliability-test-output.txt'
-                        error('Reliability tests failed. Check reliability-test-output.txt.')
+                        echo "NFR suite duration: ${duration} seconds"
                     }
-
-                    echo 'Non-functional repeatability check passed.'
                 }
             }
         }
@@ -105,13 +136,13 @@ Detailed output: reliability-test-output.txt
     post {
         always {
             archiveArtifacts(
-                artifacts: 'build/app/outputs/flutter-apk/*.apk, functional-test-report.txt, non-functional-report.txt, reliability-test-output.txt',
+                artifacts: 'build/app/outputs/flutter-apk/*.apk, functional-test-report.txt, non-functional-report.txt, safecook-search-backend/backend-test-report.txt, safecook-search-backend/nfr-test-output.txt',
                 allowEmptyArchive: true
             )
         }
 
         success {
-            echo 'SafeCook functional and non-functional checks completed successfully.'
+            echo 'SafeCook FR and NFR pipeline completed successfully.'
         }
 
         failure {
