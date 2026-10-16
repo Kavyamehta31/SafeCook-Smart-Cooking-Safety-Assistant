@@ -36,7 +36,7 @@ pipeline {
 
         stage('Automated Tests') {
             steps {
-                bat 'flutter test --reporter expanded'
+                bat 'flutter test --reporter expanded > test-report.txt 2>&1'
             }
         }
 
@@ -49,10 +49,12 @@ pipeline {
 
     post {
         always {
+            
             archiveArtifacts(
-                artifacts: 'build/app/outputs/flutter-apk/*.apk',
+                artifacts: 'build/app/outputs/flutter-apk/*.apk, test-report.txt',
                 allowEmptyArchive: true
             )
+
         }
 
         success {
