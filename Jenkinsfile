@@ -35,40 +35,66 @@ pipeline {
 
         stage('Functional Testing') {
             steps {
-                bat 'flutter test --reporter expanded > functional-test-report.txt 2>&1'
+                script {
+                    int testResult = bat(
+                        returnStatus: true,
+                        script: 'flutter test --reporter expanded > functional-test-report.txt 2>&1'
+                    )
+
+                    if (testResult != 0) {
+                        bat 'type functional-test-report.txt'
+                        error('Functional tests failed. Check functional-test-report.txt.')
+                    }
+
+                    echo 'Functional tests passed.'
+                }
             }
         }
 
         stage('Non-Functional Testing') {
-        steps {
-            bat '''
-                 @echo off
-                echo SafeCook Non-Functional Test Report > non-functional-report.txt
-                echo =================================== >> non-functional-report.txt
-                echo. >> non-functional-report.txt
-                 echo Test start time: %DATE% %TIME% >> non-functional-report.txt
+            steps {
+                script {
+                    def startTime = System.currentTimeMillis()
 
-                set START=%TIME%
-                flutter test --reporter expanded > reliability-test-output.txt 2>&1
-                if errorlevel 1 goto test_failed
+                    int testResult = bat(
+                        returnStatus: true,
+                        script: 'flutter test --reporter expanded > reliability-test-output.txt 2>&1'
+                    )
 
-                echo Reliability test result: PASSED >> non-functional-report.txt
-                echo All automated tests passed on the repeated run. >> non-functional-report.txt
-                echo. >> non-functional-report.txt
-                echo Limitations: This is a repeatability check, not a load or memory test. >> non-functional-report.txt
-                    goto test_done
+                    def endTime = System.currentTimeMillis()
+                    def durationSeconds = (endTime - startTime) / 1000.0
 
-                    :test_failed
-                echo Reliability test result: FAILED >> non-functional-report.txt
-                type reliability-test-output.txt
-                exit /b 1
+                    def report = """SafeCook Non-Functional Test Report
+===================================
+Test type: Repeatability / reliability check
+Start time: ${new Date(startTime)}
+End time: ${new Date(endTime)}
+Execution duration: ${durationSeconds} seconds
+Test command exit code: ${testResult}
+Reliability test result: ${testResult == 0 ? 'PASSED' : 'FAILED'}
 
-                :test_done
-                echo Test completion time: %DATE% %TIME% >> non-functional-report.txt
-                echo Detailed output: reliability-test-output.txt >> non-functional-report.txt
-            '''
+Note: This check repeats the Flutter automated test suite.
+It does not measure real-device load, memory usage, or backend response time.
+Detailed output: reliability-test-output.txt
+"""
+
+                    writeFile(
+                        file: 'non-functional-report.txt',
+                        text: report
+                    )
+
+                    echo "Repeated test execution duration: ${durationSeconds} seconds"
+
+                    if (testResult != 0) {
+                        bat 'type reliability-test-output.txt'
+                        error('Reliability tests failed. Check reliability-test-output.txt.')
+                    }
+
+                    echo 'Non-functional repeatability check passed.'
+                }
+            }
         }
-    }
+
         stage('Build Android APK') {
             steps {
                 bat 'flutter build apk --debug'
@@ -85,11 +111,11 @@ pipeline {
         }
 
         success {
-            echo 'SafeCook functional and non-functional pipeline checks completed successfully.'
+            echo 'SafeCook functional and non-functional checks completed successfully.'
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output and archived test reports.'
+            echo 'Pipeline failed. Check Console Output and archived reports.'
         }
     }
 }
