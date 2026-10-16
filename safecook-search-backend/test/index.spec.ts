@@ -151,21 +151,24 @@ describe("SafeCook Search Backend - Non-Functional Checks", () => {
   });
 
   it("measures response time for 10 successful mocked searches", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            answer: "Test answer",
-            results: [],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
+    
+vi.stubGlobal(
+  "fetch",
+  vi.fn().mockImplementation(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          answer: "Test answer",
+          results: [],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
       ),
-    );
+    ),
+  ),
+);
 
     const testEnv = { ...env, TAVILY_API_KEY: "test-key" };
     const durations: number[] = [];
